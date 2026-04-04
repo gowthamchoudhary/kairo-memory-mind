@@ -1,4 +1,4 @@
-@import url('https://fonts.googleapis.com/css2?family=Space+Mono:ital,wght@0,400;0,700;1,400&family=Syne:wght@400;500;600;700;800&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap');
 
 @tailwind base;
 @tailwind components;
@@ -6,44 +6,48 @@
 
 @layer base {
   :root {
-    --background: 230 40% 3%;
-    --foreground: 185 100% 90%;
+    --background: 228 33% 97%;
+    --foreground: 222 47% 11%;
 
-    --card: 230 30% 6%;
-    --card-foreground: 185 100% 90%;
+    --card: 0 0% 100%;
+    --card-foreground: 222 47% 11%;
 
-    --popover: 230 30% 6%;
-    --popover-foreground: 185 100% 90%;
+    --popover: 0 0% 100%;
+    --popover-foreground: 222 47% 11%;
 
-    --primary: 185 100% 50%;
-    --primary-foreground: 230 40% 3%;
+    --primary: 217 91% 60%;
+    --primary-foreground: 0 0% 100%;
 
-    --secondary: 33 100% 64%;
-    --secondary-foreground: 230 40% 3%;
+    --secondary: 215 20% 65%;
+    --secondary-foreground: 222 47% 11%;
 
-    --muted: 230 20% 12%;
-    --muted-foreground: 185 30% 55%;
+    --muted: 220 14% 96%;
+    --muted-foreground: 215 16% 47%;
 
-    --accent: 33 100% 64%;
-    --accent-foreground: 230 40% 3%;
+    --accent: 220 14% 96%;
+    --accent-foreground: 222 47% 11%;
 
-    --destructive: 0 84% 60%;
-    --destructive-foreground: 210 40% 98%;
+    --destructive: 0 72% 51%;
+    --destructive-foreground: 0 0% 100%;
 
-    --border: 185 60% 15%;
-    --input: 230 20% 12%;
-    --ring: 185 100% 50%;
+    --success: 142 72% 29%;
+    --warning: 32 95% 44%;
+    --alert: 0 84% 60%;
+
+    --border: 220 13% 91%;
+    --input: 220 13% 91%;
+    --ring: 217 91% 60%;
 
     --radius: 0.5rem;
 
-    --sidebar-background: 230 30% 5%;
-    --sidebar-foreground: 185 100% 90%;
-    --sidebar-primary: 185 100% 50%;
-    --sidebar-primary-foreground: 230 40% 3%;
-    --sidebar-accent: 230 20% 10%;
-    --sidebar-accent-foreground: 185 100% 90%;
-    --sidebar-border: 185 60% 12%;
-    --sidebar-ring: 185 100% 50%;
+    --sidebar-background: 0 0% 100%;
+    --sidebar-foreground: 222 47% 11%;
+    --sidebar-primary: 217 91% 60%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 220 14% 96%;
+    --sidebar-accent-foreground: 222 47% 11%;
+    --sidebar-border: 220 13% 91%;
+    --sidebar-ring: 217 91% 60%;
   }
 }
 
@@ -53,64 +57,33 @@
   }
 
   body {
-    @apply bg-background text-foreground font-sans;
-    font-family: 'Space Mono', monospace;
+    @apply bg-background text-foreground;
+    font-family: 'Inter', sans-serif;
   }
-
-  h1, h2, h3, h4, h5, h6 {
-    font-family: 'Syne', sans-serif;
-  }
-}
-
-/* Scanline overlay */
-.scanline-overlay {
-  position: fixed;
-  inset: 0;
-  pointer-events: none;
-  z-index: 50;
-  background: repeating-linear-gradient(
-    0deg,
-    transparent,
-    transparent 2px,
-    rgba(0, 245, 255, 0.015) 2px,
-    rgba(0, 245, 255, 0.015) 4px
-  );
-}
-
-/* Glowing neon border */
-.glow-border {
-  border: 1px solid hsl(185 100% 50% / 0.3);
-  box-shadow: 
-    0 0 8px hsl(185 100% 50% / 0.1),
-    inset 0 0 8px hsl(185 100% 50% / 0.05);
-}
-
-.glow-border-amber {
-  border: 1px solid hsl(33 100% 64% / 0.3);
-  box-shadow: 
-    0 0 8px hsl(33 100% 64% / 0.1),
-    inset 0 0 8px hsl(33 100% 64% / 0.05);
-}
-
-/* Typewriter cursor */
-.typewriter-cursor::after {
-  content: '▊';
-  animation: blink 1s step-end infinite;
-  color: hsl(185 100% 50%);
-}
-
-@keyframes blink {
-  50% { opacity: 0; }
 }
 
 /* Scrollbar */
 ::-webkit-scrollbar {
-  width: 4px;
+  width: 6px;
 }
 ::-webkit-scrollbar-track {
-  background: hsl(230 30% 5%);
+  background: hsl(var(--muted));
 }
 ::-webkit-scrollbar-thumb {
-  background: hsl(185 100% 50% / 0.3);
-  border-radius: 2px;
+  background: hsl(var(--border));
+  border-radius: 3px;
+}
+
+/* Alert pulse */
+@keyframes alert-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.5; }
+}
+.animate-alert-pulse {
+  animation: alert-pulse 1.5s ease-in-out infinite;
+}
+
+/* Code block styling */
+.code-block {
+  @apply bg-[#1e293b] text-[#e2e8f0] rounded-lg p-4 text-sm font-mono overflow-x-auto;
 }
