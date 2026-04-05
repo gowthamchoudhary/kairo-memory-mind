@@ -7,9 +7,9 @@ import { toast } from "@/hooks/use-toast";
 import ForceGraph2D from "react-force-graph-2d";
 
 const users = [
-  { id: "rahul", name: "Rahul Sharma" },
-  { id: "priya", name: "Priya Nair" },
-  { id: "arjun", name: "Arjun Mehta" },
+  { id: "rahul", backendId: "rahul-sharma-v2", name: "Rahul Sharma" },
+  { id: "priya", backendId: "priya-nair-v2", name: "Priya Nair" },
+  { id: "arjun", backendId: "arjun-mehta-v2", name: "Arjun Mehta" },
 ];
 
 type NodeType = "health_report" | "pattern" | "critical_alert";
@@ -166,7 +166,7 @@ export default function Memory() {
     setKiroResponse("");
     try {
       const { data, error } = await supabase.functions.invoke("kiro-chat", {
-        body: { userId: selectedUser, message: query },
+        body: { userId: users.find((user) => user.id === selectedUser)?.backendId || selectedUser, message: query },
       });
       if (error) throw error;
       setKiroResponse(data.text);
