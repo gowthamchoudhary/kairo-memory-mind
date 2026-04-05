@@ -39,6 +39,12 @@ export type NormalizedSensors = {
   weather: string | null;
 };
 
+export type StoreResult = {
+  success: boolean;
+  event_id: string;
+  error?: string;
+};
+
 let seedPromise: Promise<void> | null = null;
 
 export async function lovableChat(
@@ -69,30 +75,47 @@ export async function lovableChat(
   return data.choices?.[0]?.message?.content || "";
 }
 
-async function addHydraMemory(userId: string, text: string, metadata: Record<string, unknown>) {
+async function addHydraMemory(userId: string, text: string, metadata: Record<string, unknown>): Promise<StoreResult> {
   const hydraKey = Deno.env.get("HYDRADB_API_KEY");
-  if (!hydraKey) return;
+  const eventId = String(metadata.event_id || `${metadata.memory_type || "memory"}_${Date.now()}`);
+  if (!hydraKey) return { success: false, event_id: eventId, error: "HYDRADB_API_KEY not configured" };
 
-  await fetch("https://api.hydradb.com/memories/add_memory", {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${hydraKey}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({
-      memories: [{
-        text,
-        infer: false,
-        user_name: userId,
-        metadata: {
-          ...metadata,
-          timestamp: new Date().toISOString(),
-        },
-      }],
-      tenant_id: "kiro-platform",
-      sub_tenant_id: userId,
-    }),
-  });
+  try {
+    const response = await fetch("https://api.hydradb.com/memories/add_memory", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${hydraKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        memories: [{
+          text,
+          infer: false,
+          user_name: userId,
+          metadata: {
+            ...metadata,
+            event_id: eventId,
+            timestamp: new Date().toISOString(),
+          },
+        }],
+        tenant_id: "kiro-platform",
+        sub_tenant_id: userId,
+      }),
+    });
+
+    if (!response.ok) {
+      const error = `Hydra store failed: ${response.status}`;
+      console.error(error);
+      return { success: false, event_id: eventId, error };
+    }
+
+    console.log(`Stored ${String(metadata.memory_type || "memory")} for ${userId}: ${eventId}`);
+    return { success: true, event_id: eventId };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Unknown store error";
+    console.error(`Stored ${String(metadata.memory_type || "memory")} for ${userId} failed: ${message}`);
+    return { success: false, event_id: eventId, error: message };
+  }
 }
 
 async function recallHydra(userId: string, query: string, maxResults = 8) {
@@ -196,8 +219,7 @@ Return JSON only:
 export async function storeConversationMemory(userId: string, message: string) {
   const meaning = await extractConversationMeaning(userId, message);
   const text = `[COMPANION] ${userId}: ${meaning.summary}. People: ${meaning.people_mentioned.join(", ")}. Category: ${meaning.event_category}. Emotion: ${meaning.emotional_signal}. Life events: ${meaning.life_events.join(", ")}`;
-
-  await addHydraMemory(userId, text, {
+  const store = await addHydraMemory(userId, text, {
     memory_type: "conversation",
     event_category: meaning.event_category,
     emotional_signal: meaning.emotional_signal,
@@ -207,16 +229,29 @@ export async function storeConversationMemory(userId: string, message: string) {
     raw_message: message,
   });
 
-  return meaning;
+  return { meaning, store };
 }
 
 export async function storeHealthMemory(userId: string, sensors: NormalizedSensors, extraMetadata: Record<string, unknown> = {}) {
   const text = `[HEALTH] ${userId}: heart rate ${sensors.heart_rate}bpm, sleep ${sensors.sleep_hours}hrs, temperature ${sensors.temperature}F, emotion ${sensors.voice_emotion}, location ${sensors.location}, weather ${sensors.weather}`;
 
-  await addHydraMemory(userId, text, {
+  return await addHydraMemory(userId, text, {
     memory_type: "sensor_event",
     sensor_data: sensors,
     ...extraMetadata,
+  });
+}
+
+export async function storeKiroResponseMemory(
+  userId: string,
+  responseText: string,
+  originalMessage: string,
+  gatewaysUsed: { health: boolean; companion: boolean; intent: string },
+) {
+  return await addHydraMemory(userId, `KIRO responded to ${userId}: ${responseText}`, {
+    memory_type: "kiro_response",
+    in_reply_to: originalMessage,
+    gateways_used: gatewaysUsed,
   });
 }
 

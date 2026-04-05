@@ -9,6 +9,7 @@ import Robots from "@/pages/Robots";
 import Memory from "@/pages/Memory";
 import Analytics from "@/pages/Analytics";
 import ApiDocs from "@/pages/ApiDocs";
+import Settings from "@/pages/Settings";
 import NotFound from "@/pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -25,7 +26,7 @@ const App = () => (
           <Route path="/memory" element={<AppLayout><Memory /></AppLayout>} />
           <Route path="/analytics" element={<AppLayout><Analytics /></AppLayout>} />
           <Route path="/api-docs" element={<AppLayout><ApiDocs /></AppLayout>} />
-          <Route path="/settings" element={<AppLayout><div className="text-muted-foreground">Settings coming soon</div></AppLayout>} />
+          <Route path="/settings" element={<AppLayout><Settings /></AppLayout>} />
           <Route path="*" element={<NotFound />} />
         </Routes>
       </BrowserRouter>

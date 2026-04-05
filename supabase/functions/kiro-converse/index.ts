@@ -5,6 +5,7 @@ import {
   lovableChat,
   routeGateways,
   storeConversationMemory,
+  storeKiroResponseMemory,
   synthesizeAudio,
 } from "../_shared/kiroMemory.ts";
 
@@ -38,6 +39,11 @@ serve(async (req) => {
     ]);
 
     await storeConversationMemory(userId, message);
+    await storeKiroResponseMemory(userId, responseText, message, {
+      health: gatewayResults.healthMemories.activated,
+      companion: gatewayResults.companionMemories.activated,
+      intent: gatewayResults.intent.primary_intent,
+    });
     const audioBase64 = await synthesizeAudio(responseText);
 
     return new Response(
