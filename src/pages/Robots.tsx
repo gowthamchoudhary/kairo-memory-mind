@@ -71,8 +71,10 @@ export default function Robots() {
                 lastResponse: {
                   text: data.text,
                   confidence: data.confidence || 0.85,
-                  action: data.action || "MONITOR",
+                  action: data.alert_severity === "critical" ? "ALERT" : data.alert_severity === "high" ? "REST" : "MONITOR",
                 },
+                status: data.alert_caregiver ? "alert" : r.status,
+                alertMessage: data.alert_caregiver ? data.alert_reason : r.alertMessage,
                 totalQueries: r.totalQueries + 1,
               }
             : r
