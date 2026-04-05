@@ -1,4 +1,5 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+import { getHydraTenantId } from "../_shared/kiroMemory.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -186,6 +187,7 @@ serve(async (req) => {
 
   try {
     const HYDRADB_API_KEY = Deno.env.get("HYDRADB_API_KEY");
+    const tenantId = getHydraTenantId();
     if (!HYDRADB_API_KEY) {
       return new Response(JSON.stringify({ status: "skipped", message: "No HydraDB key configured" }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
@@ -208,7 +210,7 @@ serve(async (req) => {
           headers: { "Content-Type": "application/json", Authorization: `Bearer ${HYDRADB_API_KEY}` },
           body: JSON.stringify({
             memories,
-            tenant_id: "kiro-platform",
+            tenant_id: tenantId,
             sub_tenant_id: userId,
           }),
         });

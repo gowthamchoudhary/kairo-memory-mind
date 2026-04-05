@@ -1,4 +1,5 @@
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts";
+import { getHydraTenantId } from "../_shared/kiroMemory.ts";
 
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
@@ -46,6 +47,7 @@ serve(async (req) => {
     if (!LOVABLE_API_KEY) throw new Error("LOVABLE_API_KEY not configured");
 
     const { userId } = await req.json();
+    const tenantId = getHydraTenantId();
 
     // Try to fetch from HydraDB if key exists
     let memoryContext = SEED_CONTEXT;
@@ -55,7 +57,7 @@ serve(async (req) => {
         const recallRes = await fetch("https://api.hydradb.com/recall/recall_preferences", {
           method: "POST",
           headers: { "Content-Type": "application/json", "Authorization": `Bearer ${HYDRADB_API_KEY}` },
-          body: JSON.stringify({ query: "user wellbeing overview", tenant_id: "kiro-app", sub_tenant_id: userId }),
+          body: JSON.stringify({ query: "user wellbeing overview", tenant_id: tenantId, sub_tenant_id: userId }),
         });
         if (recallRes.ok) {
           const recallData = await recallRes.json();

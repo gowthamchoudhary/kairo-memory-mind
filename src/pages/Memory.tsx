@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useSearchParams } from "react-router-dom";
 import { Filter, Maximize2, Send, ZoomIn } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -73,7 +74,7 @@ const graphDataByUser: Record<string, { nodes: GraphNode[]; links: GraphLink[] }
       { id: "EVT_arjun_002", label: "Healthy meals", episode: "EP_arjun_001", episodeTitle: "Stable Wellness Baseline", type: "health_report", state: "stable", confidence: 0.93 },
       { id: "EVT_arjun_003", label: "Exercise 30min", episode: "EP_arjun_002", episodeTitle: "Exercise Recovery", type: "health_report", state: "improving", confidence: 0.91 },
       { id: "EVT_arjun_P1", label: "Sleep > 7h", episode: "EP_arjun_001", episodeTitle: "Stable Wellness Baseline", type: "pattern", state: "stable", confidence: 0.94 },
-      { id: "EVT_arjun_P2", label: "Exercise → Mood", episode: "EP_arjun_002", episodeTitle: "Exercise Recovery", type: "pattern", state: "stable", confidence: 0.82 },
+      { id: "EVT_arjun_P2", label: "Exercise -> Mood", episode: "EP_arjun_002", episodeTitle: "Exercise Recovery", type: "pattern", state: "stable", confidence: 0.82 },
     ],
     links: [
       { source: "EVT_arjun_001", target: "EVT_arjun_002", relation: "follows" },
@@ -103,16 +104,16 @@ const memoryFeed: Record<string, Array<{ label: string; time: string; text: stri
 
 const patterns: Record<string, Array<{ label: string; desc: string; count: number; confidence: number }>> = {
   rahul: [
-    { label: "HIGH CONFIDENCE", desc: "Low sleep + rain exposure → fatigue next morning", count: 4, confidence: 0.89 },
-    { label: "MEDIUM CONFIDENCE", desc: "Skipped meals + stress → elevated heart rate", count: 2, confidence: 0.74 },
+    { label: "HIGH CONFIDENCE", desc: "Low sleep + rain exposure -> fatigue next morning", count: 4, confidence: 0.89 },
+    { label: "MEDIUM CONFIDENCE", desc: "Skipped meals + stress -> elevated heart rate", count: 2, confidence: 0.74 },
   ],
   priya: [
-    { label: "HIGH CONFIDENCE", desc: "Heart rate above 115 bpm → pain escalation", count: 3, confidence: 0.92 },
-    { label: "MEDIUM CONFIDENCE", desc: "Poor sleep + low food → dizziness", count: 2, confidence: 0.78 },
+    { label: "HIGH CONFIDENCE", desc: "Heart rate above 115 bpm -> pain escalation", count: 3, confidence: 0.92 },
+    { label: "MEDIUM CONFIDENCE", desc: "Poor sleep + low food -> dizziness", count: 2, confidence: 0.78 },
   ],
   arjun: [
-    { label: "HIGH CONFIDENCE", desc: "Consistent sleep > 7h → stable heart rate", count: 5, confidence: 0.94 },
-    { label: "MEDIUM CONFIDENCE", desc: "Regular exercise → positive mood + lower HR", count: 3, confidence: 0.82 },
+    { label: "HIGH CONFIDENCE", desc: "Consistent sleep > 7h -> stable heart rate", count: 5, confidence: 0.94 },
+    { label: "MEDIUM CONFIDENCE", desc: "Regular exercise -> positive mood + lower HR", count: 3, confidence: 0.82 },
   ],
 };
 
@@ -137,6 +138,7 @@ function shouldShowNode(node: GraphNode, filter: GraphFilter): boolean {
 }
 
 export default function Memory() {
+  const [searchParams, setSearchParams] = useSearchParams();
   const [selectedUser, setSelectedUser] = useState("rahul");
   const [query, setQuery] = useState("");
   const [kiroResponse, setKiroResponse] = useState("");
@@ -146,6 +148,7 @@ export default function Memory() {
   const [graphFilter, setGraphFilter] = useState<GraphFilter>("all");
   const graphRef = useRef<any>(null);
   const containerRef = useRef<HTMLDivElement>(null);
+  const queryInputRef = useRef<HTMLInputElement>(null);
   const [dimensions, setDimensions] = useState({ width: 900, height: 420 });
 
   useEffect(() => {
@@ -159,6 +162,13 @@ export default function Memory() {
     window.addEventListener("resize", updateDimensions);
     return () => window.removeEventListener("resize", updateDimensions);
   }, [graphExpanded]);
+
+  useEffect(() => {
+    if (searchParams.get("action") === "ask") {
+      queryInputRef.current?.focus();
+      setSearchParams({}, { replace: true });
+    }
+  }, [searchParams, setSearchParams]);
 
   const handleAsk = async () => {
     if (!query.trim()) return;
@@ -377,6 +387,7 @@ export default function Memory() {
 
         <div className="flex flex-col gap-4 lg:flex-row">
           <Input
+            ref={queryInputRef}
             placeholder="What patterns indicate health decline?"
             value={query}
             onChange={(e) => setQuery(e.target.value)}

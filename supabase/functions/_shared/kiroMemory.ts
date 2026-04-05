@@ -47,6 +47,10 @@ export type StoreResult = {
 
 let seedPromise: Promise<void> | null = null;
 
+export function getHydraTenantId() {
+  return Deno.env.get("HYDRADB_TENANT_ID") || "kiro-platform-v2";
+}
+
 export async function lovableChat(
   messages: Array<{ role: "system" | "user"; content: string }>,
   responseFormat?: { type: "json_object" },
@@ -77,6 +81,7 @@ export async function lovableChat(
 
 async function addHydraMemory(userId: string, text: string, metadata: Record<string, unknown>): Promise<StoreResult> {
   const hydraKey = Deno.env.get("HYDRADB_API_KEY");
+  const tenantId = getHydraTenantId();
   const eventId = String(metadata.event_id || `${metadata.memory_type || "memory"}_${Date.now()}`);
   if (!hydraKey) return { success: false, event_id: eventId, error: "HYDRADB_API_KEY not configured" };
 
@@ -98,7 +103,7 @@ async function addHydraMemory(userId: string, text: string, metadata: Record<str
             timestamp: new Date().toISOString(),
           },
         }],
-        tenant_id: "kiro-platform",
+        tenant_id: tenantId,
         sub_tenant_id: userId,
       }),
     });
@@ -120,6 +125,7 @@ async function addHydraMemory(userId: string, text: string, metadata: Record<str
 
 async function recallHydra(userId: string, query: string, maxResults = 8) {
   const hydraKey = Deno.env.get("HYDRADB_API_KEY");
+  const tenantId = getHydraTenantId();
   if (!hydraKey) return { chunks: [] };
 
   const response = await fetch("https://api.hydradb.com/recall/recall_preferences", {
@@ -130,7 +136,7 @@ async function recallHydra(userId: string, query: string, maxResults = 8) {
     },
     body: JSON.stringify({
       query,
-      tenant_id: "kiro-platform",
+      tenant_id: tenantId,
       sub_tenant_id: userId,
       max_results: maxResults,
     }),
@@ -232,6 +238,64 @@ export async function storeConversationMemory(userId: string, message: string) {
   return { meaning, store };
 }
 
+export async function storeConversationPair(
+  userId: string,
+  userMessage: string,
+  kiroResponse: string,
+  meaning?: Partial<ConversationMeaning> | null,
+): Promise<StoreResult> {
+  const hydraKey = Deno.env.get("HYDRADB_API_KEY");
+  const tenantId = getHydraTenantId();
+  const eventId = `conversation_pair_${Date.now()}`;
+  if (!hydraKey) return { success: false, event_id: eventId, error: "HYDRADB_API_KEY not configured" };
+
+  try {
+    const response = await fetch("https://api.hydradb.com/memories/add_memory", {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${hydraKey}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({
+        memories: [{
+          text: `[COMPANION_PAIR] ${userId}: ${userMessage} || KIRO: ${kiroResponse}`,
+          user_assistant_pairs: [{
+            user: userMessage,
+            assistant: kiroResponse,
+          }],
+          infer: true,
+          user_name: userId,
+          metadata: {
+            memory_type: "conversation",
+            emotional_signal: meaning?.emotional_signal || "neutral",
+            event_category: meaning?.event_category || "general",
+            people_mentioned: meaning?.people_mentioned || [],
+            life_events: meaning?.life_events || [],
+            health_relevance: meaning?.health_relevance || "none",
+            event_id: eventId,
+            timestamp: new Date().toISOString(),
+          },
+        }],
+        tenant_id: tenantId,
+        sub_tenant_id: userId,
+      }),
+    });
+
+    if (!response.ok) {
+      const error = `Hydra pair store failed: ${response.status}`;
+      console.error(error);
+      return { success: false, event_id: eventId, error };
+    }
+
+    console.log(`Stored conversation_pair for ${userId}: ${eventId}`);
+    return { success: true, event_id: eventId };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "Unknown pair store error";
+    console.error(`Stored conversation_pair for ${userId} failed: ${message}`);
+    return { success: false, event_id: eventId, error: message };
+  }
+}
+
 export async function storeHealthMemory(userId: string, sensors: NormalizedSensors, extraMetadata: Record<string, unknown> = {}) {
   const text = `[HEALTH] ${userId}: heart rate ${sensors.heart_rate}bpm, sleep ${sensors.sleep_hours}hrs, temperature ${sensors.temperature}F, emotion ${sensors.voice_emotion}, location ${sensors.location}, weather ${sensors.weather}`;
 
@@ -275,10 +339,24 @@ export async function healthGateway(userId: string, query: string): Promise<Gate
 
 export async function companionGateway(userId: string, query: string): Promise<GatewayMemory> {
   try {
-    const data = await recallHydra(userId, `[COMPANION] relationship family emotion life event person ${query}`);
-    const filtered = (data.chunks || []).filter((chunk: any) =>
-      !String(chunk.chunk_content || "").includes("[HEALTH]") &&
-      chunk.document_metadata?.memory_type !== "sensor_event"
+    const [conversationRecall, pairRecall] = await Promise.all([
+      recallHydra(userId, `[COMPANION] relationship family emotion life event person ${query}`, 6),
+      recallHydra(userId, query, 6),
+    ]);
+
+    const allChunks = [...(conversationRecall.chunks || []), ...(pairRecall.chunks || [])];
+    const seen = new Set<string>();
+    const deduped = allChunks.filter((chunk: any) => {
+      const key = String(chunk.chunk_uuid || chunk.id || chunk.chunk_content || "");
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+
+    const filtered = deduped.filter((chunk: any) =>
+      !String(chunk.chunk_content || "").startsWith("[HEALTH]") &&
+      chunk.document_metadata?.memory_type !== "sensor_event" &&
+      chunk.document_metadata?.memory_type !== "kiro_response"
     );
 
     return {
@@ -336,7 +414,20 @@ You are the most present, attentive companion this person has.
 You remember their life - not to analyze them, but to actually know them.
 
 ${intent.health_relevant && !intent.companion_relevant ? "This message is health related. Use the health memory to reason carefully about what is physically happening. Be warm but be honest about what the data shows." : ""}
-${intent.companion_relevant && !intent.health_relevant ? "This message is about life, not health. Do not mention sensors, vitals, cortisol, sleep data, or any health metrics unless the person explicitly asks. Just be present. Be curious. Be warm. Respond like a companion who knows them well." : ""}
+${intent.companion_relevant && !intent.health_relevant ? `This is a personal, life-related message.
+
+You are a companion who genuinely knows this person.
+You have their health history in the background - but you are NOT a doctor right now.
+You are their friend. Their confidant. The one who remembers everything.
+
+Use what you know about them to make your response feel personal and warm.
+If their recent days have been hard - acknowledge that as a friend would, not as a clinician.
+If they mention someone - remember if you've heard about that person before.
+If they're excited - be excited with them.
+If they're nervous - sit with them in it.
+
+Never cite vitals. Never mention cortisol, sleep hours, or heart rate unless they directly ask about their health.
+Just be present. Just know them.` : ""}
 ${intent.primary_intent === "both" ? "This message touches both health and life. Weave them together naturally - only bring up health data if it genuinely adds to understanding the full picture of what this person is going through." : ""}
 
 There is no required length.

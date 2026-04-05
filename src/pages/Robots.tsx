@@ -1,7 +1,9 @@
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { Link, useSearchParams } from "react-router-dom";
 import {
   AlertTriangle,
   Bot,
+  DatabaseZap,
   Eye,
   FileText,
   Footprints,
@@ -17,6 +19,14 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { Switch } from "@/components/ui/switch";
 import { toast } from "@/hooks/use-toast";
@@ -45,12 +55,33 @@ const sensorMeta = [
 ] as const;
 
 export default function Robots() {
+  const [searchParams, setSearchParams] = useSearchParams();
   const [robots, setRobots] = useState<Robot[]>(initialRobots);
   const [memoryEnabled, setMemoryEnabled] = useState(true);
   const [queryModal, setQueryModal] = useState<string | null>(null);
   const [queryText, setQueryText] = useState("");
   const [queryMode, setQueryMode] = useState<"talking" | "symptoms">("talking");
   const [isQuerying, setIsQuerying] = useState(false);
+  const [memoryStoredNotice, setMemoryStoredNotice] = useState<{ robotId: string; user: string; kiro: string } | null>(null);
+  const [importModalOpen, setImportModalOpen] = useState(false);
+  const [isImporting, setIsImporting] = useState(false);
+  const [importRobotId, setImportRobotId] = useState(initialRobots.find((robot) => robot.status !== "offline")?.id ?? "");
+  const [importPayload, setImportPayload] = useState(
+    JSON.stringify(
+      {
+        heart_rate: 98,
+        temperature: 99.1,
+        sleep_hours: 4.2,
+        steps_today: 230,
+        voice_emotion: "distressed",
+        location: "bedroom",
+        weather: "rainy",
+      },
+      null,
+      2,
+    ),
+  );
+  const [importNote, setImportNote] = useState("I don't feel well");
 
   useEffect(() => {
     const interval = setInterval(() => {
@@ -59,7 +90,32 @@ export default function Robots() {
     return () => clearInterval(interval);
   }, []);
 
+  useEffect(() => {
+    const action = searchParams.get("action");
+    if (!action) return;
+
+    const defaultRobot = robots.find((robot) => robot.status !== "offline");
+    if (action === "query" && defaultRobot) {
+      setQueryModal(defaultRobot.id);
+      setQueryText("");
+      setQueryMode("talking");
+    }
+
+    if (action === "import") {
+      if (defaultRobot) {
+        setImportRobotId(defaultRobot.id);
+      }
+      setImportModalOpen(true);
+    }
+
+    setSearchParams({}, { replace: true });
+  }, [robots, searchParams, setSearchParams]);
+
   const alertRobot = robots.find((robot) => robot.status === "alert");
+  const importRobot = useMemo(
+    () => robots.find((robot) => robot.id === importRobotId && robot.status !== "offline") ?? null,
+    [importRobotId, robots],
+  );
 
   const handleSendQuery = useCallback(async () => {
     if (!queryText.trim() || !queryModal) return;
@@ -119,6 +175,15 @@ export default function Robots() {
         ),
       );
 
+      setMemoryStoredNotice({
+        robotId: robot.id,
+        user: queryText,
+        kiro: data.response_text || data.text,
+      });
+      window.setTimeout(() => {
+        setMemoryStoredNotice((current) => (current?.robotId === robot.id ? null : current));
+      }, 3000);
+
       const audioPayload = data.audio_base64 || data.audio;
       if (audioPayload) {
         try {
@@ -127,7 +192,9 @@ export default function Robots() {
           const url = URL.createObjectURL(blob);
           const audio = new Audio(url);
           await audio.play();
-        } catch {}
+        } catch {
+          // Audio playback is best-effort.
+        }
       }
 
       setQueryModal(null);
@@ -139,6 +206,61 @@ export default function Robots() {
       setIsQuerying(false);
     }
   }, [memoryEnabled, queryModal, queryMode, queryText, robots]);
+
+  const handleImport = useCallback(async () => {
+    if (!importRobot) return;
+
+    let parsedSensors: Record<string, unknown>;
+    try {
+      parsedSensors = JSON.parse(importPayload);
+    } catch {
+      toast({ title: "Invalid JSON", description: "Paste valid sensor JSON before importing.", variant: "destructive" });
+      return;
+    }
+
+    setIsImporting(true);
+    try {
+      const res = await supabase.functions.invoke("kiro-ingest", {
+        body: {
+          robotId: importRobot.id,
+          userId: importRobot.userId,
+          sensors: parsedSensors,
+          userInput: importNote.trim() || undefined,
+        },
+      });
+      if (res.error) throw res.error;
+
+      setRobots((prev) =>
+        prev.map((robot) =>
+          robot.id === importRobot.id
+            ? {
+                ...robot,
+                sensors: {
+                  heartRate: Number(parsedSensors.heart_rate ?? parsedSensors.heartRate ?? robot.sensors.heartRate),
+                  temperature: Number(parsedSensors.temperature ?? robot.sensors.temperature),
+                  sleepHours: Number(parsedSensors.sleep_hours ?? parsedSensors.sleepHours ?? robot.sensors.sleepHours),
+                  steps: Number(parsedSensors.steps_today ?? parsedSensors.steps ?? robot.sensors.steps),
+                  emotion: String(parsedSensors.voice_emotion ?? parsedSensors.emotion ?? robot.sensors.emotion),
+                  location: String(parsedSensors.location ?? robot.sensors.location),
+                  weather: String(parsedSensors.weather ?? robot.sensors.weather),
+                },
+                lastPing: Date.now(),
+              }
+            : robot,
+        ),
+      );
+
+      setImportModalOpen(false);
+      toast({
+        title: "Robot data imported",
+        description: `${importRobot.id} stored event ${res.data?.event_id || "successfully"} in memory.`,
+      });
+    } catch (e: any) {
+      toast({ title: "Import failed", description: e.message, variant: "destructive" });
+    } finally {
+      setIsImporting(false);
+    }
+  }, [importNote, importPayload, importRobot]);
 
   const modalRobot = robots.find((robot) => robot.id === queryModal);
 
@@ -297,17 +419,25 @@ export default function Robots() {
                             <div className="mt-2 flex flex-wrap gap-2">
                               {robot.lastResponse.gatewaysUsed.companion && (
                                 <span className="inline-flex items-center gap-2 rounded-full bg-[#F3E8FF] px-3 py-1 text-xs font-medium text-[#7C3AED]">
-                                  <span aria-hidden="true">🧠</span>
+                                  <span aria-hidden="true">Memory</span>
                                   Companion Memory
                                 </span>
                               )}
                               {robot.lastResponse.gatewaysUsed.health && (
                                 <span className="inline-flex items-center gap-2 rounded-full bg-[#DBEAFE] px-3 py-1 text-xs font-medium text-[#2563EB]">
-                                  <span aria-hidden="true">❤️</span>
+                                  <span aria-hidden="true">Health</span>
                                   Health Memory
                                 </span>
                               )}
                             </div>
+                          </div>
+                        )}
+                        {memoryStoredNotice?.robotId === robot.id && (
+                          <div className="mt-4 rounded-[18px] border border-[#DCFCE7] bg-[#F0FDF4] p-3 text-sm text-[#166534]">
+                            <p className="font-semibold">✓ Memory stored</p>
+                            <p className="mt-2 truncate">User: "{memoryStoredNotice.user}"</p>
+                            <p className="mt-1 truncate">KIRO: "{memoryStoredNotice.kiro}"</p>
+                            <p className="mt-1 text-xs text-[#15803D]">Saved to HydraDB as conversation pair</p>
                           </div>
                         )}
                       </div>
@@ -341,13 +471,20 @@ export default function Robots() {
                         <Send className="h-4 w-4" strokeWidth={1.9} />
                         Send Query
                       </button>
-                      <a href="/memory" className="dashboard-secondary-button">
+                      <Link to="/memory" className="dashboard-secondary-button">
                         <Eye className="h-4 w-4" strokeWidth={1.9} />
                         View Memory
-                      </a>
-                      <button type="button" className="dashboard-secondary-button">
+                      </Link>
+                      <button
+                        type="button"
+                        className="dashboard-secondary-button"
+                        onClick={() => {
+                          setImportRobotId(robot.id);
+                          setImportModalOpen(true);
+                        }}
+                      >
                         <FileText className="h-4 w-4" strokeWidth={1.9} />
-                        API Log
+                        Import Data
                       </button>
                     </>
                   )}
@@ -410,7 +547,7 @@ export default function Robots() {
 
             <div className="flex items-center justify-between text-sm text-slate-500">
               <span>
-                Pipeline: {queryMode === "talking" ? "Conversation → Memory → Respond" : "Sensors + Conversation → Reason → Respond"}
+                Pipeline: {queryMode === "talking" ? "Conversation -> Memory -> Respond" : "Sensors + Conversation -> Reason -> Respond"}
               </span>
               <span className={memoryEnabled ? "font-semibold text-[#16A34A]" : ""}>
                 Memory {memoryEnabled ? "ON" : "OFF"}
@@ -423,6 +560,78 @@ export default function Robots() {
               className="h-12 rounded-full bg-[#111827] text-sm font-medium text-white hover:bg-[#111827]/95"
             >
               {isQuerying ? "Processing..." : "Send to KIRO"}
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={importModalOpen} onOpenChange={setImportModalOpen}>
+        <DialogContent className="max-w-2xl rounded-[24px] border border-[#EEF2F7] bg-white p-0 shadow-[0_24px_60px_rgba(15,23,42,0.14)]">
+          <DialogHeader className="border-b border-[#EEF2F7] px-6 py-5">
+            <DialogTitle className="flex items-center gap-3 text-base font-semibold text-slate-900">
+              <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-[#EFF6FF] text-[#2563EB]">
+                <DatabaseZap className="h-5 w-5" strokeWidth={1.9} />
+              </div>
+              Import Robot Data
+            </DialogTitle>
+          </DialogHeader>
+
+          <div className="space-y-5 px-6 py-6">
+            <div className="grid gap-4 md:grid-cols-[220px_1fr]">
+              <div className="space-y-2">
+                <label className="text-sm font-medium text-slate-700">Robot</label>
+                <Select value={importRobotId} onValueChange={setImportRobotId}>
+                  <SelectTrigger className="h-12 rounded-[18px] border-[#E5E7EB] bg-[#FBFCFE] px-4 text-sm shadow-none focus:ring-[#2563EB]">
+                    <SelectValue placeholder="Choose a robot" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {robots
+                      .filter((robot) => robot.status !== "offline")
+                      .map((robot) => (
+                        <SelectItem key={robot.id} value={robot.id}>
+                          {robot.id}
+                        </SelectItem>
+                      ))}
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="space-y-2">
+                <label className="text-sm font-medium text-slate-700">Context note</label>
+                <Input
+                  value={importNote}
+                  onChange={(event) => setImportNote(event.target.value)}
+                  className="h-12 rounded-[18px] border-[#E5E7EB] bg-[#FBFCFE] px-4 shadow-none focus-visible:ring-[#2563EB]"
+                  placeholder="Optional user note for this sensor event"
+                />
+              </div>
+            </div>
+
+            <div className="rounded-[20px] bg-[#F8FAFC] p-4">
+              <p className="text-sm font-medium text-slate-900">{importRobot?.userName || "Robot import"}</p>
+              <p className="mt-1 text-sm text-slate-500">
+                Paste live sensor JSON to send a real ingest event through the backend memory pipeline.
+              </p>
+            </div>
+
+            <Textarea
+              value={importPayload}
+              onChange={(event) => setImportPayload(event.target.value)}
+              rows={12}
+              className="min-h-[280px] rounded-[20px] border-[#E5E7EB] bg-[#FBFCFE] px-4 py-3 font-mono text-sm shadow-none focus-visible:ring-[#2563EB]"
+            />
+
+            <div className="flex items-center justify-between gap-4 text-sm text-slate-500">
+              <span>Endpoint: kiro-ingest</span>
+              <span>{importRobot ? `${importRobot.id} -> ${importRobot.userId}` : "Select a robot"}</span>
+            </div>
+
+            <Button
+              onClick={handleImport}
+              disabled={isImporting || !importRobot}
+              className="h-12 rounded-full bg-[#111827] text-sm font-medium text-white hover:bg-[#111827]/95"
+            >
+              {isImporting ? "Importing..." : "Import into KIRO"}
             </Button>
           </div>
         </DialogContent>
