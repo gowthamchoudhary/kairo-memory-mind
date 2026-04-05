@@ -12,6 +12,11 @@ export interface RobotResponse {
   text: string;
   confidence: number;
   action: "REST" | "HYDRATE" | "ALERT" | "MONITOR";
+  gatewaysUsed?: {
+    health: boolean;
+    companion: boolean;
+    intent?: string;
+  };
 }
 
 export interface Robot {
@@ -136,12 +141,12 @@ export const initialRobots: Robot[] = [
 
 export function randomizeSensors(robot: Robot): Robot {
   if (robot.status === "offline") return robot;
-  const s = { ...robot.sensors };
-  s.heartRate = Math.max(60, Math.min(140, s.heartRate + (Math.random() * 6 - 3)));
-  s.heartRate = Math.round(s.heartRate);
-  s.temperature = Math.round((s.temperature + (Math.random() * 0.4 - 0.2)) * 10) / 10;
-  s.steps = s.steps + Math.floor(Math.random() * 15);
-  return { ...robot, sensors: s, lastPing: Date.now() };
+  const sensors = { ...robot.sensors };
+  sensors.heartRate = Math.max(60, Math.min(140, sensors.heartRate + (Math.random() * 6 - 3)));
+  sensors.heartRate = Math.round(sensors.heartRate);
+  sensors.temperature = Math.round((sensors.temperature + (Math.random() * 0.4 - 0.2)) * 10) / 10;
+  sensors.steps = sensors.steps + Math.floor(Math.random() * 15);
+  return { ...robot, sensors, lastPing: Date.now() };
 }
 
 export const seedMemoriesData: Record<string, string[]> = {

@@ -1,6 +1,19 @@
 import {
-  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend,
-  AreaChart, Area, LineChart, Line, PieChart, Pie, Cell
+  Area,
+  AreaChart,
+  Bar,
+  BarChart,
+  CartesianGrid,
+  Cell,
+  Legend,
+  Line,
+  LineChart,
+  Pie,
+  PieChart,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
 } from "recharts";
 
 const queriesPerRobot = [
@@ -32,81 +45,135 @@ const alertFrequency = [
 ];
 
 const actionBreakdown = [
-  { name: "MONITOR", value: 45, color: "hsl(217, 91%, 60%)" },
-  { name: "REST", value: 28, color: "hsl(142, 72%, 29%)" },
-  { name: "HYDRATE", value: 15, color: "hsl(32, 95%, 44%)" },
-  { name: "ALERT", value: 12, color: "hsl(0, 72%, 51%)" },
+  { name: "MONITOR", value: 45, color: "#2563EB" },
+  { name: "REST", value: 28, color: "#16A34A" },
+  { name: "HYDRATE", value: 15, color: "#F59E0B" },
+  { name: "ALERT", value: 12, color: "#DC2626" },
 ];
 
-const chartStyle = {
-  background: "hsl(var(--card))",
-  border: "1px solid hsl(var(--border))",
-  borderRadius: 8,
-  fontSize: 12,
+const tooltipStyle = {
+  background: "#FFFFFF",
+  border: "1px solid #E5E7EB",
+  borderRadius: 16,
+  boxShadow: "0 10px 30px rgba(15, 23, 42, 0.08)",
 };
+
+function CardShell({ title, subtitle, children }: { title: string; subtitle: string; children: React.ReactNode }) {
+  return (
+    <section className="dashboard-card p-6">
+      <div className="mb-6">
+        <h2 className="text-lg font-semibold text-slate-900">{title}</h2>
+        <p className="mt-1 text-sm text-slate-500">{subtitle}</p>
+      </div>
+      {children}
+    </section>
+  );
+}
 
 export default function Analytics() {
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-      {/* Queries per robot */}
-      <div className="bg-card rounded-lg border border-border p-4 shadow-sm">
-        <h2 className="text-sm font-semibold text-foreground mb-4">Queries per Robot (Daily)</h2>
-        <ResponsiveContainer width="100%" height={240}>
-          <BarChart data={queriesPerRobot}>
-            <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
-            <XAxis dataKey="day" tick={{ fontSize: 12, fill: "hsl(var(--muted-foreground))" }} />
-            <YAxis tick={{ fontSize: 12, fill: "hsl(var(--muted-foreground))" }} />
-            <Tooltip contentStyle={chartStyle} />
-            <Legend />
-            <Bar dataKey="elder" name="Elder" fill="hsl(217, 91%, 60%)" radius={[2,2,0,0]} />
-            <Bar dataKey="med" name="Hospital" fill="hsl(32, 95%, 44%)" radius={[2,2,0,0]} />
-            <Bar dataKey="home" name="Home" fill="hsl(142, 72%, 29%)" radius={[2,2,0,0]} />
-          </BarChart>
-        </ResponsiveContainer>
-      </div>
+    <div className="grid gap-6 xl:grid-cols-2">
+      <CardShell title="Queries per Robot (Daily)" subtitle="Daily grouped traffic across eldercare, hospital, and home units">
+        <div className="h-[320px]">
+          <ResponsiveContainer width="100%" height="100%">
+            <BarChart data={queriesPerRobot} barGap={10}>
+              <CartesianGrid vertical={false} stroke="#EEF2F7" />
+              <XAxis axisLine={false} dataKey="day" tick={{ fill: "#64748B", fontSize: 12 }} tickLine={false} />
+              <YAxis axisLine={false} tick={{ fill: "#64748B", fontSize: 12 }} tickLine={false} />
+              <Tooltip contentStyle={tooltipStyle} />
+              <Legend wrapperStyle={{ fontSize: 12 }} />
+              <Bar dataKey="elder" name="Elder" fill="#2563EB" radius={[10, 10, 0, 0]} maxBarSize={18} />
+              <Bar dataKey="med" name="Hospital" fill="#F59E0B" radius={[10, 10, 0, 0]} maxBarSize={18} />
+              <Bar dataKey="home" name="Home" fill="#16A34A" radius={[10, 10, 0, 0]} maxBarSize={18} />
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
+      </CardShell>
 
-      {/* Confidence distribution */}
-      <div className="bg-card rounded-lg border border-border p-4 shadow-sm">
-        <h2 className="text-sm font-semibold text-foreground mb-4">Confidence Score Distribution</h2>
-        <ResponsiveContainer width="100%" height={240}>
-          <AreaChart data={confidenceData}>
-            <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
-            <XAxis dataKey="range" tick={{ fontSize: 12, fill: "hsl(var(--muted-foreground))" }} />
-            <YAxis tick={{ fontSize: 12, fill: "hsl(var(--muted-foreground))" }} />
-            <Tooltip contentStyle={chartStyle} />
-            <Area type="monotone" dataKey="count" stroke="hsl(217, 91%, 60%)" fill="hsl(217, 91%, 60%)" fillOpacity={0.2} />
-          </AreaChart>
-        </ResponsiveContainer>
-      </div>
+      <CardShell title="Confidence Score Distribution" subtitle="Model confidence density over the current weekly reasoning window">
+        <div className="h-[320px]">
+          <ResponsiveContainer width="100%" height="100%">
+            <AreaChart data={confidenceData}>
+              <defs>
+                <linearGradient id="confidenceFill" x1="0" x2="0" y1="0" y2="1">
+                  <stop offset="0%" stopColor="#60A5FA" stopOpacity={0.4} />
+                  <stop offset="100%" stopColor="#60A5FA" stopOpacity={0.05} />
+                </linearGradient>
+              </defs>
+              <CartesianGrid vertical={false} stroke="#EEF2F7" />
+              <XAxis axisLine={false} dataKey="range" tick={{ fill: "#64748B", fontSize: 12 }} tickLine={false} />
+              <YAxis axisLine={false} tick={{ fill: "#64748B", fontSize: 12 }} tickLine={false} />
+              <Tooltip contentStyle={tooltipStyle} />
+              <Area
+                dataKey="count"
+                fill="url(#confidenceFill)"
+                stroke="#2563EB"
+                strokeWidth={3}
+                type="monotone"
+              />
+            </AreaChart>
+          </ResponsiveContainer>
+        </div>
+      </CardShell>
 
-      {/* Alert frequency */}
-      <div className="bg-card rounded-lg border border-border p-4 shadow-sm">
-        <h2 className="text-sm font-semibold text-foreground mb-4">Alert Frequency</h2>
-        <ResponsiveContainer width="100%" height={240}>
-          <LineChart data={alertFrequency}>
-            <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
-            <XAxis dataKey="day" tick={{ fontSize: 12, fill: "hsl(var(--muted-foreground))" }} />
-            <YAxis tick={{ fontSize: 12, fill: "hsl(var(--muted-foreground))" }} />
-            <Tooltip contentStyle={chartStyle} />
-            <Line type="monotone" dataKey="alerts" stroke="hsl(0, 72%, 51%)" strokeWidth={2} dot={{ fill: "hsl(0, 72%, 51%)" }} />
-          </LineChart>
-        </ResponsiveContainer>
-      </div>
+      <CardShell title="Alert Frequency" subtitle="Critical incidents detected across the fleet during the last seven days">
+        <div className="h-[320px]">
+          <ResponsiveContainer width="100%" height="100%">
+            <LineChart data={alertFrequency}>
+              <CartesianGrid vertical={false} stroke="#EEF2F7" />
+              <XAxis axisLine={false} dataKey="day" tick={{ fill: "#64748B", fontSize: 12 }} tickLine={false} />
+              <YAxis axisLine={false} tick={{ fill: "#64748B", fontSize: 12 }} tickLine={false} />
+              <Tooltip contentStyle={tooltipStyle} />
+              <Line
+                dataKey="alerts"
+                stroke="#DC2626"
+                strokeWidth={3}
+                type="monotone"
+                dot={{ r: 5, fill: "#FFFFFF", stroke: "#DC2626", strokeWidth: 2 }}
+                activeDot={{ r: 6, fill: "#DC2626" }}
+              />
+            </LineChart>
+          </ResponsiveContainer>
+        </div>
+      </CardShell>
 
-      {/* Action breakdown */}
-      <div className="bg-card rounded-lg border border-border p-4 shadow-sm">
-        <h2 className="text-sm font-semibold text-foreground mb-4">Response Actions</h2>
-        <ResponsiveContainer width="100%" height={240}>
-          <PieChart>
-            <Pie data={actionBreakdown} dataKey="value" nameKey="name" cx="50%" cy="50%" outerRadius={80} label={({ name, percent }) => `${name} ${(percent * 100).toFixed(0)}%`}>
-              {actionBreakdown.map((entry, i) => (
-                <Cell key={i} fill={entry.color} />
-              ))}
-            </Pie>
-            <Tooltip contentStyle={chartStyle} />
-          </PieChart>
-        </ResponsiveContainer>
-      </div>
+      <CardShell title="Response Actions" subtitle="Distribution of the recommended action types across recent interactions">
+        <div className="grid items-center gap-6 lg:grid-cols-[minmax(0,1fr)_180px]">
+          <div className="h-[300px]">
+            <ResponsiveContainer width="100%" height="100%">
+              <PieChart>
+                <Tooltip contentStyle={tooltipStyle} />
+                <Pie
+                  data={actionBreakdown}
+                  cx="50%"
+                  cy="50%"
+                  dataKey="value"
+                  innerRadius={68}
+                  outerRadius={102}
+                  paddingAngle={4}
+                  stroke="none"
+                >
+                  {actionBreakdown.map((entry) => (
+                    <Cell key={entry.name} fill={entry.color} />
+                  ))}
+                </Pie>
+              </PieChart>
+            </ResponsiveContainer>
+          </div>
+
+          <div className="space-y-3">
+            {actionBreakdown.map((entry) => (
+              <div key={entry.name} className="rounded-2xl border border-[#EEF2F7] px-4 py-3">
+                <div className="flex items-center gap-3">
+                  <span className="h-3 w-3 rounded-full" style={{ backgroundColor: entry.color }} />
+                  <span className="text-sm font-semibold text-slate-900">{entry.name}</span>
+                </div>
+                <p className="mt-2 text-sm text-slate-500">{entry.value}% of response actions</p>
+              </div>
+            ))}
+          </div>
+        </div>
+      </CardShell>
     </div>
   );
 }

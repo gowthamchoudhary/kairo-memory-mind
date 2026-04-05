@@ -1,5 +1,20 @@
-import { useState, useEffect, useCallback } from "react";
-import { Bot, AlertTriangle, Send, Eye, FileText, RefreshCw, Settings2 } from "lucide-react";
+import { useCallback, useEffect, useState } from "react";
+import {
+  AlertTriangle,
+  Bot,
+  Eye,
+  FileText,
+  Footprints,
+  HeartPulse,
+  MapPin,
+  MessageSquareText,
+  MoonStar,
+  RefreshCw,
+  Send,
+  Smile,
+  Thermometer,
+  WifiOff,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Textarea } from "@/components/ui/textarea";
@@ -10,22 +25,24 @@ import { supabase } from "@/integrations/supabase/client";
 
 function timeSince(ts: number): string {
   const seconds = Math.floor((Date.now() - ts) / 1000);
-  if (seconds < 60) return `${seconds} seconds ago`;
+  if (seconds < 60) return `${seconds}s ago`;
   if (seconds < 3600) return `${Math.floor(seconds / 60)} min ago`;
-  return `${Math.floor(seconds / 3600)} hours ago`;
+  return `${Math.floor(seconds / 3600)} hr ago`;
 }
 
-function getStatusColor(status: Robot["status"]) {
-  if (status === "active") return "text-success";
-  if (status === "alert") return "text-warning";
-  return "text-muted-foreground";
+function statusStyles(status: Robot["status"]) {
+  if (status === "active") return { text: "text-[#16A34A]", dot: "bg-[#16A34A]" };
+  if (status === "alert") return { text: "text-[#D97706]", dot: "bg-[#D97706]" };
+  return { text: "text-slate-400", dot: "bg-slate-300" };
 }
 
-function getStatusBg(status: Robot["status"]) {
-  if (status === "active") return "bg-success";
-  if (status === "alert") return "bg-warning animate-alert-pulse";
-  return "bg-muted-foreground";
-}
+const sensorMeta = [
+  { key: "heartRate", label: "Heart rate", icon: HeartPulse },
+  { key: "temperature", label: "Temperature", icon: Thermometer },
+  { key: "sleepHours", label: "Sleep", icon: MoonStar },
+  { key: "steps", label: "Steps", icon: Footprints },
+  { key: "emotion", label: "Emotion", icon: Smile },
+] as const;
 
 export default function Robots() {
   const [robots, setRobots] = useState<Robot[]>(initialRobots);
@@ -35,7 +52,6 @@ export default function Robots() {
   const [queryMode, setQueryMode] = useState<"talking" | "symptoms">("talking");
   const [isQuerying, setIsQuerying] = useState(false);
 
-  // Live sensor updates every 5 seconds
   useEffect(() => {
     const interval = setInterval(() => {
       setRobots((prev) => prev.map(randomizeSensors));
@@ -43,11 +59,11 @@ export default function Robots() {
     return () => clearInterval(interval);
   }, []);
 
-  const alertRobot = robots.find((r) => r.status === "alert");
+  const alertRobot = robots.find((robot) => robot.status === "alert");
 
   const handleSendQuery = useCallback(async () => {
     if (!queryText.trim() || !queryModal) return;
-    const robot = robots.find((r) => r.id === queryModal);
+    const robot = robots.find((item) => item.id === queryModal);
     if (!robot) return;
 
     setIsQuerying(true);
@@ -55,7 +71,6 @@ export default function Robots() {
       let data: any;
 
       if (queryMode === "talking") {
-        // Pure conversation — no sensors
         const res = await supabase.functions.invoke("kiro-converse", {
           body: {
             robotId: robot.id,
@@ -67,7 +82,6 @@ export default function Robots() {
         if (res.error) throw res.error;
         data = res.data;
       } else {
-        // Reporting symptoms — with live sensors
         const res = await supabase.functions.invoke("kiro-reason", {
           body: {
             robotId: robot.id,
@@ -82,26 +96,33 @@ export default function Robots() {
       }
 
       setRobots((prev) =>
-        prev.map((r) =>
-          r.id === robot.id
+        prev.map((item) =>
+          item.id === robot.id
             ? {
-                ...r,
+                ...item,
                 lastResponse: {
-                  text: data.text,
+                  text: data.response_text || data.text,
                   confidence: data.confidence || 0.85,
-                  action: data.alert_severity === "critical" ? "ALERT" : data.alert_severity === "high" ? "REST" : "MONITOR",
+                  action:
+                    data.alert_severity === "critical"
+                      ? "ALERT"
+                      : data.alert_severity === "high"
+                        ? "REST"
+                        : "MONITOR",
+                  gatewaysUsed: data.gateways_used,
                 },
-                status: data.alert_caregiver ? "alert" : r.status,
-                alertMessage: data.alert_caregiver ? data.alert_reason : r.alertMessage,
-                totalQueries: r.totalQueries + 1,
+                status: data.alert_caregiver ? "alert" : item.status,
+                alertMessage: data.alert_caregiver ? data.alert_reason : item.alertMessage,
+                totalQueries: item.totalQueries + 1,
               }
-            : r
-        )
+            : item,
+        ),
       );
 
-      if (data.audio) {
+      const audioPayload = data.audio_base64 || data.audio;
+      if (audioPayload) {
         try {
-          const audioBytes = Uint8Array.from(atob(data.audio), (c) => c.charCodeAt(0));
+          const audioBytes = Uint8Array.from(atob(audioPayload), (char) => char.charCodeAt(0));
           const blob = new Blob([audioBytes], { type: "audio/mpeg" });
           const url = URL.createObjectURL(blob);
           const audio = new Audio(url);
@@ -111,202 +132,296 @@ export default function Robots() {
 
       setQueryModal(null);
       setQueryText("");
-      toast({ title: "Query processed", description: data.text.slice(0, 80) + "..." });
+      toast({ title: "Query processed", description: `${(data.response_text || data.text).slice(0, 80)}...` });
     } catch (e: any) {
       toast({ title: "Query failed", description: e.message, variant: "destructive" });
     } finally {
       setIsQuerying(false);
     }
-  }, [queryModal, queryText, queryMode, robots, memoryEnabled]);
+  }, [memoryEnabled, queryModal, queryMode, queryText, robots]);
 
-  const modalRobot = robots.find((r) => r.id === queryModal);
+  const modalRobot = robots.find((robot) => robot.id === queryModal);
 
   return (
-    <div className="space-y-4">
-      {/* Alert banner */}
+    <div className="space-y-6">
       {alertRobot && (
-        <div className="bg-warning/10 border border-warning/30 rounded-lg px-4 py-3 flex items-center gap-3">
-          <AlertTriangle className="w-5 h-5 text-warning animate-alert-pulse" />
-          <span className="text-sm font-medium text-foreground">
+        <section className="flex items-center gap-3 rounded-2xl border border-[#F3E8D5] bg-[#FCF5EA] px-5 py-4 text-sm text-slate-700 shadow-[0_4px_14px_rgba(148,163,184,0.08)]">
+          <div className="flex h-10 w-10 items-center justify-center rounded-full bg-white/80 text-[#D97706]">
+            <AlertTriangle className="h-5 w-5" strokeWidth={1.9} />
+          </div>
+          <p className="font-medium">
             1 Active Alert — {alertRobot.id} — {alertRobot.alertMessage}
-          </span>
-        </div>
+          </p>
+        </section>
       )}
 
-      {/* Memory toggle */}
-      <div className="bg-card rounded-lg border border-border p-4 shadow-sm flex items-center justify-between">
-        <div>
-          <h2 className="text-sm font-semibold text-foreground">KIRO Memory Engine</h2>
-          <p className="text-xs text-muted-foreground">
-            {memoryEnabled ? "Full contextual response from memory" : "Generic stateless response"}
-          </p>
+      <section className="dashboard-card p-6">
+        <div className="flex items-center justify-between">
+          <div>
+            <h2 className="text-lg font-semibold text-slate-900">KIRO Memory Engine</h2>
+            <p className="mt-1 text-sm text-slate-500">
+              {memoryEnabled ? "Context-aware reasoning is enabled across live robot interactions" : "Stateless mode is active"}
+            </p>
+          </div>
+          <div className="flex items-center gap-4">
+            <span className={`text-sm font-semibold ${memoryEnabled ? "text-[#16A34A]" : "text-slate-400"}`}>
+              {memoryEnabled ? "ON" : "OFF"}
+            </span>
+            <Switch checked={memoryEnabled} onCheckedChange={setMemoryEnabled} />
+          </div>
         </div>
-        <div className="flex items-center gap-3">
-          <span className={`text-xs font-medium ${memoryEnabled ? "text-success" : "text-muted-foreground"}`}>
-            {memoryEnabled ? "ON" : "OFF"}
-          </span>
-          <Switch checked={memoryEnabled} onCheckedChange={setMemoryEnabled} />
-        </div>
-      </div>
+      </section>
 
-      {/* Robot grid */}
-      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-        {robots.map((robot) => (
-          <div
-            key={robot.id}
-            className={`bg-card rounded-lg border shadow-sm ${
-              robot.status === "alert" ? "border-warning/50" : "border-border"
-            }`}
-          >
-            {/* Header */}
-            <div className="p-4 border-b border-border">
-              <div className="flex items-center justify-between mb-1">
-                <div className="flex items-center gap-2">
-                  <Bot className="w-4 h-4 text-muted-foreground" />
-                  <span className="font-mono text-sm font-semibold text-foreground">{robot.id}</span>
-                </div>
-                <span className={`flex items-center gap-1.5 text-xs font-medium ${getStatusColor(robot.status)}`}>
-                  <span className={`w-2 h-2 rounded-full ${getStatusBg(robot.status)}`} />
-                  {robot.status.toUpperCase()}
-                </span>
-              </div>
-              <p className="text-xs text-muted-foreground">{robot.name}</p>
-              {robot.status !== "offline" && (
-                <p className="text-xs text-muted-foreground">
-                  User: {robot.userName}, {robot.userAge} yrs
-                </p>
-              )}
-            </div>
+      <section className="grid gap-6 xl:grid-cols-2">
+        {robots.map((robot) => {
+          const styles = statusStyles(robot.status);
 
-            {/* Body */}
-            <div className="p-4 space-y-3">
-              {robot.status === "offline" ? (
-                <div className="text-center py-6 text-muted-foreground">
-                  <p className="text-sm">No sensor data available</p>
-                  <p className="text-xs mt-1">Robot is not connected</p>
-                </div>
-              ) : (
-                <>
-                  {/* Meta */}
-                  <div className="flex items-center gap-4 text-xs text-muted-foreground">
-                    <span>Last ping: {timeSince(robot.lastPing)}</span>
-                    <span>Uptime: {robot.uptime}%</span>
-                    <span>Queries: {robot.totalQueries}</span>
-                  </div>
-
-                  {/* Sensors */}
+          return (
+            <article
+              key={robot.id}
+              className={`dashboard-card dashboard-hover-card overflow-hidden ${
+                robot.status === "alert" ? "border-[#FDE7C7]" : ""
+              }`}
+            >
+              <div className="border-b border-[#EEF2F7] px-6 py-5">
+                <div className="flex items-start justify-between gap-4">
                   <div>
-                    <p className="text-xs font-semibold text-foreground mb-2 uppercase tracking-wider">Live Sensors</p>
-                    <div className="grid grid-cols-2 gap-x-4 gap-y-1.5 text-xs">
-                      <span>❤️ HR: <strong className={robot.sensors.heartRate > 110 ? "text-destructive" : "text-foreground"}>{robot.sensors.heartRate} bpm</strong></span>
-                      <span>🌡️ Temp: <strong className={robot.sensors.temperature > 100 ? "text-warning" : "text-foreground"}>{robot.sensors.temperature}°F</strong></span>
-                      <span>😴 Sleep: <strong className={robot.sensors.sleepHours < 5 ? "text-warning" : "text-foreground"}>{robot.sensors.sleepHours}h</strong></span>
-                      <span>👣 Steps: <strong>{robot.sensors.steps}</strong></span>
-                      <span>😐 Emotion: <strong>{robot.sensors.emotion}</strong></span>
-                      <span>📍 {robot.sensors.location} &nbsp;{robot.sensors.weather === "Rainy" ? "🌧️" : robot.sensors.weather === "Cloudy" ? "☁️" : "☀️"} {robot.sensors.weather}</span>
-                    </div>
-                  </div>
-
-                  {/* Response */}
-                  {robot.lastResponse && (
-                    <div className={`rounded-md p-3 text-xs ${robot.status === "alert" ? "bg-warning/5 border border-warning/20" : "bg-accent"}`}>
-                      {robot.status === "alert" && (
-                        <p className="text-warning font-semibold mb-1 flex items-center gap-1">
-                          <AlertTriangle className="w-3 h-3" /> CAREGIVER ALERT SENT
-                        </p>
-                      )}
-                      <p className="text-foreground italic">"{robot.lastResponse.text}"</p>
-                      <div className="flex items-center gap-3 mt-2 text-muted-foreground">
-                        <span>Confidence: {robot.lastResponse.confidence.toFixed(2)}</span>
-                        <span>Action: {robot.lastResponse.action}</span>
+                    <div className="flex items-center gap-3">
+                      <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-[#F8FAFC] text-slate-500">
+                        {robot.status === "offline" ? (
+                          <WifiOff className="h-[18px] w-[18px]" strokeWidth={1.9} />
+                        ) : (
+                          <Bot className="h-[18px] w-[18px]" strokeWidth={1.9} />
+                        )}
+                      </div>
+                      <div>
+                        <h3 className="text-base font-semibold text-slate-900">{robot.id}</h3>
+                        <p className="mt-1 text-sm text-slate-500">{robot.name}</p>
                       </div>
                     </div>
+                    {robot.status !== "offline" && (
+                      <p className="mt-4 text-sm text-slate-600">
+                        {robot.userName}, {robot.userAge}
+                      </p>
+                    )}
+                  </div>
+
+                  <div className={`inline-flex items-center gap-2 rounded-full bg-[#F8FAFC] px-3 py-1.5 text-xs font-semibold ${styles.text}`}>
+                    <span className={`h-2.5 w-2.5 rounded-full ${styles.dot} ${robot.status === "alert" ? "animate-alert-pulse" : ""}`} />
+                    {robot.status.toUpperCase()}
+                  </div>
+                </div>
+
+                {robot.status !== "offline" && (
+                  <div className="mt-5 grid gap-4 text-sm text-slate-500 md:grid-cols-3">
+                    <div>
+                      <p className="text-xs uppercase tracking-[0.18em] text-slate-400">Last ping</p>
+                      <p className="mt-2 font-medium text-slate-700">{timeSince(robot.lastPing)}</p>
+                    </div>
+                    <div>
+                      <p className="text-xs uppercase tracking-[0.18em] text-slate-400">Uptime</p>
+                      <p className="mt-2 font-medium text-slate-700">{robot.uptime}%</p>
+                    </div>
+                    <div>
+                      <p className="text-xs uppercase tracking-[0.18em] text-slate-400">Queries</p>
+                      <p className="mt-2 font-medium text-slate-700">{robot.totalQueries}</p>
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              <div className="space-y-5 px-6 py-6">
+                {robot.status === "offline" ? (
+                  <div className="rounded-[20px] border border-dashed border-[#E5E7EB] bg-[#FBFCFE] px-6 py-10 text-center">
+                    <p className="text-sm font-medium text-slate-700">No live sensor data available</p>
+                    <p className="mt-2 text-sm text-slate-500">This robot is currently offline and waiting for reconnection.</p>
+                  </div>
+                ) : (
+                  <>
+                    <div>
+                      <div className="mb-4 flex items-center justify-between">
+                        <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Live sensors</p>
+                        <div className="flex items-center gap-2 text-xs text-slate-500">
+                          <MapPin className="h-3.5 w-3.5" strokeWidth={1.9} />
+                          {robot.sensors.location}
+                        </div>
+                      </div>
+
+                      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-1 2xl:grid-cols-2">
+                        {sensorMeta.map((item) => {
+                          const Icon = item.icon;
+                          let value = "";
+
+                          if (item.key === "heartRate") value = `${robot.sensors.heartRate} bpm`;
+                          if (item.key === "temperature") value = `${robot.sensors.temperature}°F`;
+                          if (item.key === "sleepHours") value = `${robot.sensors.sleepHours}h`;
+                          if (item.key === "steps") value = `${robot.sensors.steps}`;
+                          if (item.key === "emotion") value = robot.sensors.emotion;
+
+                          return (
+                            <div key={item.key} className="rounded-[20px] bg-[#F8FAFC] px-4 py-3">
+                              <div className="flex items-center gap-3">
+                                <div className="flex h-9 w-9 items-center justify-center rounded-2xl bg-white text-slate-500 shadow-sm">
+                                  <Icon className="h-4 w-4" strokeWidth={1.9} />
+                                </div>
+                                <div>
+                                  <p className="text-xs font-medium text-slate-500">{item.label}</p>
+                                  <p className="mt-1 text-sm font-semibold text-slate-900">{value}</p>
+                                </div>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+
+                    {robot.lastResponse && (
+                      <div className="rounded-[20px] bg-[#F8FAFC] p-4">
+                        {robot.status === "alert" && (
+                          <div className="mb-3 inline-flex items-center gap-2 rounded-full bg-[#FEF3C7] px-3 py-1 text-[11px] font-semibold text-[#B45309]">
+                            <AlertTriangle className="h-3.5 w-3.5" strokeWidth={1.9} />
+                            CAREGIVER ALERT SENT
+                          </div>
+                        )}
+                        <p className="text-sm italic leading-6 text-slate-700">"{robot.lastResponse.text}"</p>
+                        <div className="mt-3 flex flex-wrap gap-2">
+                          <span className="dashboard-pill">Confidence {robot.lastResponse.confidence.toFixed(2)}</span>
+                          <span className="dashboard-pill">Action {robot.lastResponse.action}</span>
+                          <span className="dashboard-pill">{robot.sensors.weather}</span>
+                        </div>
+                        {robot.lastResponse.gatewaysUsed && (
+                          <div className="mt-4">
+                            <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">
+                              KIRO responded using
+                            </p>
+                            <div className="mt-2 flex flex-wrap gap-2">
+                              {robot.lastResponse.gatewaysUsed.companion && (
+                                <span className="inline-flex items-center gap-2 rounded-full bg-[#F3E8FF] px-3 py-1 text-xs font-medium text-[#7C3AED]">
+                                  <span aria-hidden="true">🧠</span>
+                                  Companion Memory
+                                </span>
+                              )}
+                              {robot.lastResponse.gatewaysUsed.health && (
+                                <span className="inline-flex items-center gap-2 rounded-full bg-[#DBEAFE] px-3 py-1 text-xs font-medium text-[#2563EB]">
+                                  <span aria-hidden="true">❤️</span>
+                                  Health Memory
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </>
+                )}
+
+                <div className="flex flex-wrap gap-3">
+                  {robot.status === "offline" ? (
+                    <>
+                      <button type="button" className="dashboard-secondary-button">
+                        <RefreshCw className="h-4 w-4" strokeWidth={1.9} />
+                        Reconnect
+                      </button>
+                      <button type="button" className="dashboard-secondary-button">
+                        <FileText className="h-4 w-4" strokeWidth={1.9} />
+                        View Logs
+                      </button>
+                    </>
+                  ) : (
+                    <>
+                      <button
+                        type="button"
+                        className="dashboard-primary-button"
+                        onClick={() => {
+                          setQueryModal(robot.id);
+                          setQueryText("");
+                          setQueryMode("talking");
+                        }}
+                      >
+                        <Send className="h-4 w-4" strokeWidth={1.9} />
+                        Send Query
+                      </button>
+                      <a href="/memory" className="dashboard-secondary-button">
+                        <Eye className="h-4 w-4" strokeWidth={1.9} />
+                        View Memory
+                      </a>
+                      <button type="button" className="dashboard-secondary-button">
+                        <FileText className="h-4 w-4" strokeWidth={1.9} />
+                        API Log
+                      </button>
+                    </>
                   )}
-                </>
-              )}
-            </div>
+                </div>
+              </div>
+            </article>
+          );
+        })}
+      </section>
 
-            {/* Actions */}
-            <div className="px-4 pb-4 flex gap-2">
-              {robot.status === "offline" ? (
-                <>
-                  <Button variant="outline" size="sm" className="text-xs gap-1.5"><RefreshCw className="w-3 h-3" />Reconnect</Button>
-                  <Button variant="outline" size="sm" className="text-xs gap-1.5"><FileText className="w-3 h-3" />View Logs</Button>
-                  <Button variant="outline" size="sm" className="text-xs gap-1.5"><Settings2 className="w-3 h-3" />Configure</Button>
-                </>
-              ) : (
-                <>
-                  <Button size="sm" className="text-xs gap-1.5" onClick={() => { setQueryModal(robot.id); setQueryText(""); setQueryMode("talking"); }}>
-                    <Send className="w-3 h-3" />Send Query
-                  </Button>
-                  <Button variant="outline" size="sm" className="text-xs gap-1.5" asChild>
-                    <a href="/memory"><Eye className="w-3 h-3" />View Memory</a>
-                  </Button>
-                  <Button variant="outline" size="sm" className="text-xs gap-1.5">
-                    <FileText className="w-3 h-3" />API Log
-                  </Button>
-                </>
-              )}
-            </div>
-          </div>
-        ))}
-      </div>
-
-      {/* Query modal — updated with conversation mode */}
       <Dialog open={!!queryModal} onOpenChange={() => setQueryModal(null)}>
-        <DialogContent className="bg-card">
-          <DialogHeader>
-            <DialogTitle className="text-sm font-semibold">Talk to KIRO — {queryModal}</DialogTitle>
+        <DialogContent className="max-w-xl rounded-[24px] border border-[#EEF2F7] bg-white p-0 shadow-[0_24px_60px_rgba(15,23,42,0.14)]">
+          <DialogHeader className="border-b border-[#EEF2F7] px-6 py-5">
+            <DialogTitle className="flex items-center gap-3 text-base font-semibold text-slate-900">
+              <div className="flex h-10 w-10 items-center justify-center rounded-2xl bg-[#EFF6FF] text-[#2563EB]">
+                <MessageSquareText className="h-5 w-5" strokeWidth={1.9} />
+              </div>
+              Talk to KIRO — {queryModal}
+            </DialogTitle>
           </DialogHeader>
-          <div className="space-y-4">
-            <p className="text-xs text-muted-foreground">
-              {modalRobot ? `${modalRobot.userName} says:` : "User says:"}
-            </p>
+
+          <div className="space-y-5 px-6 py-6">
+            <div className="rounded-[20px] bg-[#F8FAFC] p-4">
+              <p className="text-sm font-medium text-slate-900">{modalRobot ? modalRobot.userName : "User input"}</p>
+              <p className="mt-1 text-sm text-slate-500">Choose whether this is general conversation or symptom reporting.</p>
+            </div>
+
             <Textarea
-              placeholder={queryMode === "talking"
-                ? "e.g. My daughter called today, it was nice to hear from her"
-                : "e.g. I feel dizzy and didn't eat today"
+              placeholder={
+                queryMode === "talking"
+                  ? "My daughter called today, it was nice to hear from her"
+                  : "I feel dizzy and I did not eat well today"
               }
               value={queryText}
               onChange={(e) => setQueryText(e.target.value)}
-              rows={3}
-              className="resize-none"
+              rows={5}
+              className="min-h-[140px] rounded-[20px] border-[#E5E7EB] bg-[#FBFCFE] px-4 py-3 text-sm shadow-none focus-visible:ring-[#2563EB]"
             />
 
-            {/* Mode toggle */}
-            <div className="flex items-center gap-4">
-              <label className="flex items-center gap-2 cursor-pointer">
-                <input
-                  type="radio"
-                  name="queryMode"
-                  checked={queryMode === "talking"}
-                  onChange={() => setQueryMode("talking")}
-                  className="w-3.5 h-3.5 accent-primary"
-                />
-                <span className="text-xs text-foreground">Just talking</span>
-              </label>
-              <label className="flex items-center gap-2 cursor-pointer">
-                <input
-                  type="radio"
-                  name="queryMode"
-                  checked={queryMode === "symptoms"}
-                  onChange={() => setQueryMode("symptoms")}
-                  className="w-3.5 h-3.5 accent-primary"
-                />
-                <span className="text-xs text-foreground">Reporting symptoms</span>
-              </label>
+            <div className="flex flex-wrap gap-3">
+              <button
+                type="button"
+                onClick={() => setQueryMode("talking")}
+                className={`rounded-full px-4 py-2 text-sm font-medium transition-all ${
+                  queryMode === "talking" ? "bg-[#2563EB] text-white" : "bg-[#F3F4F6] text-slate-600"
+                }`}
+              >
+                Just talking
+              </button>
+              <button
+                type="button"
+                onClick={() => setQueryMode("symptoms")}
+                className={`rounded-full px-4 py-2 text-sm font-medium transition-all ${
+                  queryMode === "symptoms" ? "bg-[#2563EB] text-white" : "bg-[#F3F4F6] text-slate-600"
+                }`}
+              >
+                Reporting symptoms
+              </button>
             </div>
 
-            <div className="flex items-center justify-between text-xs text-muted-foreground">
+            <div className="flex items-center justify-between text-sm text-slate-500">
               <span>
                 Pipeline: {queryMode === "talking" ? "Conversation → Memory → Respond" : "Sensors + Conversation → Reason → Respond"}
               </span>
-              <span className={memoryEnabled ? "text-success font-medium" : ""}>
-                Memory: {memoryEnabled ? "ON" : "OFF"}
+              <span className={memoryEnabled ? "font-semibold text-[#16A34A]" : ""}>
+                Memory {memoryEnabled ? "ON" : "OFF"}
               </span>
             </div>
 
-            <Button onClick={handleSendQuery} disabled={isQuerying || !queryText.trim()} className="w-full">
+            <Button
+              onClick={handleSendQuery}
+              disabled={isQuerying || !queryText.trim()}
+              className="h-12 rounded-full bg-[#111827] text-sm font-medium text-white hover:bg-[#111827]/95"
+            >
               {isQuerying ? "Processing..." : "Send to KIRO"}
             </Button>
           </div>
