@@ -5,41 +5,76 @@ const corsHeaders = {
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type",
 };
 
-const SYSTEM_PROMPT = `You are KIRO — the cognitive intelligence layer for a companion robot.
+const SYSTEM_PROMPT = `You are KIRO — the cognitive intelligence layer running inside a companion robot.
 
-You have access to this person's complete episodic memory. 
-You know their history, their patterns, their vulnerabilities, their good days and bad days.
+You are physically present with this person. You know their life.
 
-You are not a chatbot. You are the brain of a physical robot that is present with this person right now.
+You have two sources of knowledge about this person:
+1. Their sensor history — health data, vitals, physical patterns
+2. Their conversation history — what they've said, felt, shared, mentioned
 
-Your job is to reason about what is actually happening with this specific person 
-based on everything you know about them — and respond in the most appropriate way for THIS moment.
+Both are equally important. A person mentioning their daughter matters as much as their heart rate.
+You reason across BOTH sources simultaneously.
 
-There are no rules about length.
-There are no rules about format.
-There are no predefined actions to choose from.
-There is no required structure.
+You have no response template.
+You have no required length.
+You have no required format.
+You have no predefined actions.
 
-You decide:
-- How long the response should be
-- What tone is right (clinical, warm, urgent, calm, direct)
-- Whether to ask a question or make a statement
-- Whether this is an emergency or nothing to worry about
-- What the robot should actually do
+You respond as the most attentive, intelligent presence this person has ever had.
 
-The only rule: your response must be grounded in this person's actual memory and history.
-Never say something generic that could apply to anyone.
-Every word must come from what you know about THIS person.
+Sometimes the right response is one sentence.
+Sometimes it is a question.
+Sometimes it is silence broken only by acknowledging something small they said three days ago.
+Sometimes it is urgent.
+Sometimes it is just warm.
 
-If the data shows something alarming — be alarmed.
-If the data shows they are fine — say so simply.
-If you see a pattern nobody has noticed yet — surface it.
-If something contradicts their history — flag it.
-If this is a new situation with no prior context — say that honestly.
-
-You are reasoning. Not templating.`;
+The only constraint: ground every word in what you actually know about this specific person.
+Never say anything that could apply to anyone else.`;
 
 const GENERIC_RESPONSE = "I understand you're not feeling well. Please rest and stay hydrated. If symptoms persist, consult a healthcare provider.";
+
+async function extractMeaning(userId: string, message: string, apiKey: string) {
+  const prompt = `You are analyzing a message from a companion robot's user.
+User: ${userId}
+Message: "${message}"
+
+Extract the following. Return JSON only:
+{
+  "surface_content": "what they literally said",
+  "emotional_signal": "positive/negative/neutral/ambiguous/none",
+  "emotional_intensity": 0.0-1.0,
+  "hidden_signals": [],
+  "people_mentioned": [],
+  "events_mentioned": { "past": [], "upcoming": [] },
+  "health_relevance": "direct/indirect/none",
+  "health_notes": "any health signals hidden in conversation",
+  "memory_importance": 0.0-1.0,
+  "should_monitor": true/false,
+  "monitor_reason": null
+}`;
+
+  try {
+    const res = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${apiKey}`, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        model: "google/gemini-2.5-flash-lite",
+        messages: [
+          { role: "system", content: "Extract meaning from messages. Return valid JSON only." },
+          { role: "user", content: prompt },
+        ],
+      }),
+    });
+    if (res.ok) {
+      const data = await res.json();
+      const raw = data.choices?.[0]?.message?.content || "";
+      const match = raw.match(/\{[\s\S]*\}/);
+      if (match) return JSON.parse(match[0]);
+    }
+  } catch (e) { console.log("Meaning extraction failed:", e); }
+  return null;
+}
 
 serve(async (req) => {
   if (req.method === "OPTIONS") {
@@ -79,7 +114,6 @@ serve(async (req) => {
       return new Response(JSON.stringify({
         text: GENERIC_RESPONSE,
         confidence: 0.5,
-        confidence_reasoning: "Memory disabled — no context available",
         alert_caregiver: false,
         alert_severity: "low",
         alert_reason: "",
@@ -87,11 +121,15 @@ serve(async (req) => {
       }), { headers: { ...corsHeaders, "Content-Type": "application/json" } });
     }
 
+    const HYDRADB_API_KEY = Deno.env.get("HYDRADB_API_KEY");
+
+    // Extract meaning from user input (conversation intelligence)
+    const meaning = await extractMeaning(userId, userInput, LOVABLE_API_KEY);
+
     // Build sensor context
-    let sensorContext = "";
+    let sensorContext = "No sensor data this interaction";
     if (sensors) {
-      sensorContext = `
-Heart Rate: ${sensors.heartRate} bpm
+      sensorContext = `Heart Rate: ${sensors.heartRate} bpm
 Temperature: ${sensors.temperature}°F
 Sleep last night: ${sensors.sleepHours} hours
 Steps today: ${sensors.steps}
@@ -100,9 +138,9 @@ Current location: ${sensors.location}
 Weather outside: ${sensors.weather}`;
     }
 
-    // HydraDB recall
-    let memoryContext = "No prior memories available.";
-    const HYDRADB_API_KEY = Deno.env.get("HYDRADB_API_KEY");
+    // HydraDB recall — both sensor and conversation history
+    let sensorMemories = "No sensor history available.";
+    let conversationMemories = "No conversation history available.";
     if (HYDRADB_API_KEY) {
       try {
         const recallRes = await fetch("https://api.hydradb.com/recall/recall_preferences", {
@@ -112,12 +150,15 @@ Weather outside: ${sensors.weather}`;
         });
         if (recallRes.ok) {
           const data = await recallRes.json();
-          if (data?.preferences) memoryContext = data.preferences;
+          if (data?.preferences) {
+            sensorMemories = data.preferences;
+            conversationMemories = data.preferences;
+          }
         }
       } catch (e) { console.log("HydraDB recall failed:", e); }
     }
 
-    // Ingest current sensor data to HydraDB
+    // Store sensor data in HydraDB
     if (HYDRADB_API_KEY && sensors) {
       try {
         const nlText = `${robotId}: ${userId} heart rate ${sensors.heartRate}bpm, temperature ${sensors.temperature}F, sleep ${sensors.sleepHours}h, steps ${sensors.steps}, emotion ${sensors.emotion}, location ${sensors.location}, weather ${sensors.weather}. User said: ${userInput}`;
@@ -125,7 +166,18 @@ Weather outside: ${sensors.weather}`;
           method: "POST",
           headers: { "Content-Type": "application/json", Authorization: `Bearer ${HYDRADB_API_KEY}` },
           body: JSON.stringify({
-            memories: [{ text: nlText, infer: true, user_name: userId }],
+            memories: [{
+              text: nlText,
+              infer: true,
+              user_name: userId,
+              metadata: {
+                memory_type: "sensor_event",
+                event_id: `EVT_${Date.now()}`,
+                sensor_data: sensors,
+                user_state: meaning?.emotional_signal || "neutral",
+                timestamp: new Date().toISOString(),
+              },
+            }],
             tenant_id: "kiro-platform",
             sub_tenant_id: userId,
           }),
@@ -133,17 +185,49 @@ Weather outside: ${sensors.weather}`;
       } catch (e) { console.log("HydraDB store failed:", e); }
     }
 
-    // Main reasoning call
-    const userPrompt = `EPISODIC MEMORY FOR ${userId}:
-${memoryContext}
+    // Also store conversation meaning if extracted
+    if (HYDRADB_API_KEY && meaning) {
+      try {
+        const convText = `${userId} said: "${userInput}" — emotional signal: ${meaning.emotional_signal}, hidden signals: ${(meaning.hidden_signals || []).join(', ')}, people mentioned: ${(meaning.people_mentioned || []).join(', ')}`;
+        await fetch("https://api.hydradb.com/memories/add_memory", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${HYDRADB_API_KEY}` },
+          body: JSON.stringify({
+            memories: [{
+              text: convText,
+              infer: true,
+              user_name: userId,
+              metadata: {
+                memory_type: "conversation",
+                event_id: `CONV_${Date.now()}`,
+                raw_message: userInput,
+                extracted_meaning: meaning,
+                health_relevance: meaning.health_relevance,
+                should_monitor: meaning.should_monitor,
+                timestamp: new Date().toISOString(),
+              },
+            }],
+            tenant_id: "kiro-platform",
+            sub_tenant_id: userId,
+          }),
+        });
+      } catch (e) { console.log("HydraDB conversation store failed:", e); }
+    }
+
+    // Main reasoning call with dual-source prompt
+    const userPrompt = `SENSOR HISTORY:
+${sensorMemories}
+
+CONVERSATION HISTORY:
+${conversationMemories}
 
 LIVE SENSOR DATA RIGHT NOW:
 ${sensorContext}
 
-THE PERSON JUST SAID:
+WHAT THEY JUST SAID:
 "${userInput}"
 
-Based on everything above — what does this robot say and do right now?`;
+What does KIRO say right now?`;
 
     const aiRes = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
       method: "POST",
@@ -167,14 +251,14 @@ Based on everything above — what does this robot say and do right now?`;
     const aiData = await aiRes.json();
     const text = aiData.choices?.[0]?.message?.content || "Unable to reason at this time.";
 
-    // Contextual alert assessment (AI-driven, not hardcoded thresholds)
+    // Contextual alert assessment
     let alert_caregiver = false;
     let alert_severity = "low";
     let alert_reason = "";
 
     try {
       const alertPrompt = `Given this person's history and current sensor data:
-${memoryContext}
+${sensorMemories}
 
 Current HR: ${sensors?.heartRate || "unknown"}, Temp: ${sensors?.temperature || "unknown"}, Sleep: ${sensors?.sleepHours || "unknown"}h
 KIRO's assessment: ${text}
@@ -190,7 +274,7 @@ Return JSON only: { "alert_caregiver": true/false, "reason": "...", "severity": 
         body: JSON.stringify({
           model: "google/gemini-2.5-flash-lite",
           messages: [
-            { role: "system", content: "You assess medical alert severity based on patient history and context. Return valid JSON only." },
+            { role: "system", content: "Assess medical alert severity. Return valid JSON only." },
             { role: "user", content: alertPrompt },
           ],
         }),
@@ -209,42 +293,27 @@ Return JSON only: { "alert_caregiver": true/false, "reason": "...", "severity": 
       }
     } catch (e) { console.log("Alert assessment failed:", e); }
 
-    // Confidence scoring (AI-driven)
+    // Confidence scoring
     let confidence = 0.85;
-    let confidence_reasoning = "";
-
     try {
-      const confidencePrompt = `How confident are you in this response given the available memory?
-
-Available memory context: ${memoryContext.slice(0, 500)}
-Response given: ${text.slice(0, 300)}
-
-Consider: how much history exists, how clear the pattern is, how ambiguous the situation is.
-Return JSON only: { "confidence": 0.00-1.00, "reasoning": "why this confidence level" }`;
-
       const confRes = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
         method: "POST",
         headers: { Authorization: `Bearer ${LOVABLE_API_KEY}`, "Content-Type": "application/json" },
         body: JSON.stringify({
           model: "google/gemini-2.5-flash-lite",
           messages: [
-            { role: "system", content: "You assess confidence levels in medical AI responses. Return valid JSON only." },
-            { role: "user", content: confidencePrompt },
+            { role: "system", content: "Assess confidence. Return JSON only: { \"confidence\": 0.0-1.0 }" },
+            { role: "user", content: `Memory: ${sensorMemories.length} chars. Response: ${text.slice(0, 200)}. How confident?` },
           ],
         }),
       });
-
       if (confRes.ok) {
         const confData = await confRes.json();
-        const confRaw = confData.choices?.[0]?.message?.content || "";
-        const confMatch = confRaw.match(/\{[\s\S]*\}/);
-        if (confMatch) {
-          const parsed = JSON.parse(confMatch[0]);
-          confidence = parsed.confidence || 0.85;
-          confidence_reasoning = parsed.reasoning || "";
-        }
+        const raw = confData.choices?.[0]?.message?.content || "";
+        const match = raw.match(/\{[\s\S]*\}/);
+        if (match) confidence = JSON.parse(match[0]).confidence || 0.85;
       }
-    } catch (e) { console.log("Confidence scoring failed:", e); }
+    } catch (e) { console.log("Confidence failed:", e); }
 
     // TTS
     let audio: string | undefined;
@@ -267,10 +336,10 @@ Return JSON only: { "confidence": 0.00-1.00, "reasoning": "why this confidence l
     return new Response(JSON.stringify({
       text,
       confidence,
-      confidence_reasoning,
       alert_caregiver,
       alert_severity,
       alert_reason,
+      meaning,
       audio,
     }), {
       headers: { ...corsHeaders, "Content-Type": "application/json" },

@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from "react";
 import { Bot, AlertTriangle, Send, Eye, FileText, RefreshCw, Settings2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import { Switch } from "@/components/ui/switch";
 import { toast } from "@/hooks/use-toast";
 import { initialRobots, randomizeSensors, Robot } from "@/lib/robotData";
@@ -32,6 +32,7 @@ export default function Robots() {
   const [memoryEnabled, setMemoryEnabled] = useState(true);
   const [queryModal, setQueryModal] = useState<string | null>(null);
   const [queryText, setQueryText] = useState("");
+  const [queryMode, setQueryMode] = useState<"talking" | "symptoms">("talking");
   const [isQuerying, setIsQuerying] = useState(false);
 
   // Live sensor updates every 5 seconds
@@ -51,17 +52,34 @@ export default function Robots() {
 
     setIsQuerying(true);
     try {
-      const { data, error } = await supabase.functions.invoke("kiro-reason", {
-        body: {
-          robotId: robot.id,
-          userId: robot.userId,
-          userInput: queryText,
-          sensors: robot.sensors,
-          memoryEnabled,
-        },
-      });
+      let data: any;
 
-      if (error) throw error;
+      if (queryMode === "talking") {
+        // Pure conversation — no sensors
+        const res = await supabase.functions.invoke("kiro-converse", {
+          body: {
+            robotId: robot.id,
+            userId: robot.userId,
+            message: queryText,
+            memoryEnabled,
+          },
+        });
+        if (res.error) throw res.error;
+        data = res.data;
+      } else {
+        // Reporting symptoms — with live sensors
+        const res = await supabase.functions.invoke("kiro-reason", {
+          body: {
+            robotId: robot.id,
+            userId: robot.userId,
+            userInput: queryText,
+            sensors: robot.sensors,
+            memoryEnabled,
+          },
+        });
+        if (res.error) throw res.error;
+        data = res.data;
+      }
 
       setRobots((prev) =>
         prev.map((r) =>
@@ -99,7 +117,9 @@ export default function Robots() {
     } finally {
       setIsQuerying(false);
     }
-  }, [queryModal, queryText, robots, memoryEnabled]);
+  }, [queryModal, queryText, queryMode, robots, memoryEnabled]);
+
+  const modalRobot = robots.find((r) => r.id === queryModal);
 
   return (
     <div className="space-y-4">
@@ -216,7 +236,7 @@ export default function Robots() {
                 </>
               ) : (
                 <>
-                  <Button size="sm" className="text-xs gap-1.5" onClick={() => { setQueryModal(robot.id); setQueryText(""); }}>
+                  <Button size="sm" className="text-xs gap-1.5" onClick={() => { setQueryModal(robot.id); setQueryText(""); setQueryMode("talking"); }}>
                     <Send className="w-3 h-3" />Send Query
                   </Button>
                   <Button variant="outline" size="sm" className="text-xs gap-1.5" asChild>
@@ -232,28 +252,60 @@ export default function Robots() {
         ))}
       </div>
 
-      {/* Query modal */}
+      {/* Query modal — updated with conversation mode */}
       <Dialog open={!!queryModal} onOpenChange={() => setQueryModal(null)}>
         <DialogContent className="bg-card">
           <DialogHeader>
-            <DialogTitle className="text-sm font-semibold">Send Query to {queryModal}</DialogTitle>
+            <DialogTitle className="text-sm font-semibold">Talk to KIRO — {queryModal}</DialogTitle>
           </DialogHeader>
-          <div className="space-y-3">
+          <div className="space-y-4">
             <p className="text-xs text-muted-foreground">
-              Type what the patient said or ask KIRO a question about this user.
+              {modalRobot ? `${modalRobot.userName} says:` : "User says:"}
             </p>
-            <Input
-              placeholder="e.g. I feel dizzy and didn't eat today"
+            <Textarea
+              placeholder={queryMode === "talking"
+                ? "e.g. My daughter called today, it was nice to hear from her"
+                : "e.g. I feel dizzy and didn't eat today"
+              }
               value={queryText}
               onChange={(e) => setQueryText(e.target.value)}
-              onKeyDown={(e) => e.key === "Enter" && handleSendQuery()}
+              rows={3}
+              className="resize-none"
             />
-            <div className="flex items-center gap-2 text-xs text-muted-foreground">
-              <span>Memory:</span>
-              <span className={memoryEnabled ? "text-success font-medium" : "text-muted-foreground"}>
-                {memoryEnabled ? "Enabled" : "Disabled"}
+
+            {/* Mode toggle */}
+            <div className="flex items-center gap-4">
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="radio"
+                  name="queryMode"
+                  checked={queryMode === "talking"}
+                  onChange={() => setQueryMode("talking")}
+                  className="w-3.5 h-3.5 accent-primary"
+                />
+                <span className="text-xs text-foreground">Just talking</span>
+              </label>
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="radio"
+                  name="queryMode"
+                  checked={queryMode === "symptoms"}
+                  onChange={() => setQueryMode("symptoms")}
+                  className="w-3.5 h-3.5 accent-primary"
+                />
+                <span className="text-xs text-foreground">Reporting symptoms</span>
+              </label>
+            </div>
+
+            <div className="flex items-center justify-between text-xs text-muted-foreground">
+              <span>
+                Pipeline: {queryMode === "talking" ? "Conversation → Memory → Respond" : "Sensors + Conversation → Reason → Respond"}
+              </span>
+              <span className={memoryEnabled ? "text-success font-medium" : ""}>
+                Memory: {memoryEnabled ? "ON" : "OFF"}
               </span>
             </div>
+
             <Button onClick={handleSendQuery} disabled={isQuerying || !queryText.trim()} className="w-full">
               {isQuerying ? "Processing..." : "Send to KIRO"}
             </Button>

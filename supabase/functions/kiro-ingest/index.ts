@@ -30,6 +30,61 @@ serve(async (req) => {
       });
     }
 
+    // Extract meaning from user_input if present (conversation intelligence pipeline)
+    let conversationMeaning = null;
+    if (userInput && LOVABLE_API_KEY) {
+      try {
+        const meaningPrompt = `Analyze this message from user ${userId}: "${userInput}"
+Return JSON only: { "emotional_signal": "positive/negative/neutral", "hidden_signals": [], "people_mentioned": [], "health_relevance": "direct/indirect/none", "memory_importance": 0.0-1.0 }`;
+        const meaningRes = await fetch("https://ai.gateway.lovable.dev/v1/chat/completions", {
+          method: "POST",
+          headers: { Authorization: `Bearer ${LOVABLE_API_KEY}`, "Content-Type": "application/json" },
+          body: JSON.stringify({
+            model: "google/gemini-2.5-flash-lite",
+            messages: [
+              { role: "system", content: "Extract meaning from messages. Return valid JSON only." },
+              { role: "user", content: meaningPrompt },
+            ],
+          }),
+        });
+        if (meaningRes.ok) {
+          const mData = await meaningRes.json();
+          const raw = mData.choices?.[0]?.message?.content || "";
+          const match = raw.match(/\{[\s\S]*\}/);
+          if (match) conversationMeaning = JSON.parse(match[0]);
+        }
+      } catch (e) { console.log("Meaning extraction in ingest failed:", e); }
+    }
+
+    // Store conversation memory alongside sensor memory if user_input exists
+    if (HYDRADB_API_KEY && userInput && conversationMeaning) {
+      try {
+        const convText = `${userId} said: "${userInput}" — emotional: ${conversationMeaning.emotional_signal}, health relevance: ${conversationMeaning.health_relevance}`;
+        await fetch("https://api.hydradb.com/memories/add_memory", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", Authorization: `Bearer ${HYDRADB_API_KEY}` },
+          body: JSON.stringify({
+            memories: [{
+              text: convText,
+              infer: true,
+              user_name: userId,
+              metadata: {
+                memory_type: "conversation",
+                event_id: `CONV_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`,
+                episode_id: episodeId,
+                raw_message: userInput,
+                extracted_meaning: conversationMeaning,
+                health_relevance: conversationMeaning.health_relevance,
+                timestamp: new Date().toISOString(),
+              },
+            }],
+            tenant_id: "kiro-platform",
+            sub_tenant_id: userId,
+          }),
+        });
+      } catch (e) { console.log("Conversation store in ingest failed:", e); }
+    }
+
     const eventId = `EVT_${Date.now()}_${Math.random().toString(36).slice(2, 6)}`;
     const timestamp = new Date().toISOString();
 
