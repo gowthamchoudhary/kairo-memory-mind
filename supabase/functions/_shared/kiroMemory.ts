@@ -45,6 +45,15 @@ export type StoreResult = {
   error?: string;
 };
 
+export const MEMORY_CATEGORIES = {
+  EPISODIC: "episodic",
+  SEMANTIC: "semantic",
+  SESSION: "session",
+} as const;
+
+type MemoryLayer = typeof MEMORY_CATEGORIES[keyof typeof MEMORY_CATEGORIES];
+type MemoryDomain = "companion" | "health";
+
 let seedPromise: Promise<void> | null = null;
 
 export function getHydraTenantId() {
@@ -79,7 +88,15 @@ export async function lovableChat(
   return data.choices?.[0]?.message?.content || "";
 }
 
-async function addHydraMemory(userId: string, text: string, metadata: Record<string, unknown>): Promise<StoreResult> {
+async function addHydraMemory(
+  userId: string,
+  text: string,
+  metadata: Record<string, unknown>,
+  options?: {
+    infer?: boolean;
+    userAssistantPairs?: Array<{ user: string; assistant: string }>;
+  },
+): Promise<StoreResult> {
   const hydraKey = Deno.env.get("HYDRADB_API_KEY");
   const tenantId = getHydraTenantId();
   const eventId = String(metadata.event_id || `${metadata.memory_type || "memory"}_${Date.now()}`);
@@ -95,8 +112,9 @@ async function addHydraMemory(userId: string, text: string, metadata: Record<str
       body: JSON.stringify({
         memories: [{
           text,
-          infer: false,
+          infer: options?.infer ?? false,
           user_name: userId,
+          ...(options?.userAssistantPairs ? { user_assistant_pairs: options.userAssistantPairs } : {}),
           metadata: {
             ...metadata,
             event_id: eventId,
@@ -114,11 +132,11 @@ async function addHydraMemory(userId: string, text: string, metadata: Record<str
       return { success: false, event_id: eventId, error };
     }
 
-    console.log(`Stored ${String(metadata.memory_type || "memory")} for ${userId}: ${eventId}`);
+    console.log(`Stored ${String(metadata.layer || metadata.memory_type || "memory")} for ${userId}: ${eventId}`);
     return { success: true, event_id: eventId };
   } catch (error) {
     const message = error instanceof Error ? error.message : "Unknown store error";
-    console.error(`Stored ${String(metadata.memory_type || "memory")} for ${userId} failed: ${message}`);
+    console.error(`Stored ${String(metadata.layer || metadata.memory_type || "memory")} for ${userId} failed: ${message}`);
     return { success: false, event_id: eventId, error: message };
   }
 }
@@ -224,8 +242,13 @@ Return JSON only:
 
 export async function storeConversationMemory(userId: string, message: string) {
   const meaning = await extractConversationMeaning(userId, message);
-  const text = `[COMPANION] ${userId}: ${meaning.summary}. People: ${meaning.people_mentioned.join(", ")}. Category: ${meaning.event_category}. Emotion: ${meaning.emotional_signal}. Life events: ${meaning.life_events.join(", ")}`;
+  const today = new Date().toISOString().slice(0, 10);
+  const primaryEvent = meaning.life_events[0] || meaning.event_category || "conversation";
+  const text = `[EPISODIC][COMPANION] ${userId}: ${meaning.summary}. People: ${meaning.people_mentioned.join(", ") || "none"}. Emotion: ${meaning.emotional_signal}. Life events: ${meaning.life_events.join(", ") || "none"}.`;
+
   const store = await addHydraMemory(userId, text, {
+    layer: MEMORY_CATEGORIES.EPISODIC,
+    domain: "companion",
     memory_type: "conversation",
     event_category: meaning.event_category,
     emotional_signal: meaning.emotional_signal,
@@ -233,6 +256,9 @@ export async function storeConversationMemory(userId: string, message: string) {
     life_events: meaning.life_events,
     health_relevance: meaning.health_relevance,
     raw_message: message,
+    date: today,
+    emotion: meaning.emotional_signal,
+    event: primaryEvent,
   });
 
   return { meaning, store };
@@ -244,94 +270,74 @@ export async function storeConversationPair(
   kiroResponse: string,
   meaning?: Partial<ConversationMeaning> | null,
 ): Promise<StoreResult> {
-  const hydraKey = Deno.env.get("HYDRADB_API_KEY");
-  const tenantId = getHydraTenantId();
-  const eventId = `conversation_pair_${Date.now()}`;
-  if (!hydraKey) return { success: false, event_id: eventId, error: "HYDRADB_API_KEY not configured" };
-
-  try {
-    const response = await fetch("https://api.hydradb.com/memories/add_memory", {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${hydraKey}`,
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({
-        memories: [{
-          text: `[COMPANION_PAIR] ${userId}: ${userMessage} || KIRO: ${kiroResponse}`,
-          user_assistant_pairs: [{
-            user: userMessage,
-            assistant: kiroResponse,
-          }],
-          infer: true,
-          user_name: userId,
-          metadata: {
-            memory_type: "conversation",
-            emotional_signal: meaning?.emotional_signal || "neutral",
-            event_category: meaning?.event_category || "general",
-            people_mentioned: meaning?.people_mentioned || [],
-            life_events: meaning?.life_events || [],
-            health_relevance: meaning?.health_relevance || "none",
-            event_id: eventId,
-            timestamp: new Date().toISOString(),
-          },
-        }],
-        tenant_id: tenantId,
-        sub_tenant_id: userId,
-      }),
-    });
-
-    if (!response.ok) {
-      const error = `Hydra pair store failed: ${response.status}`;
-      console.error(error);
-      return { success: false, event_id: eventId, error };
-    }
-
-    console.log(`Stored conversation_pair for ${userId}: ${eventId}`);
-    return { success: true, event_id: eventId };
-  } catch (error) {
-    const message = error instanceof Error ? error.message : "Unknown pair store error";
-    console.error(`Stored conversation_pair for ${userId} failed: ${message}`);
-    return { success: false, event_id: eventId, error: message };
-  }
+  return await addHydraMemory(
+    userId,
+    `[SESSION][COMPANION] ${userId}: ${userMessage} || KIRO: ${kiroResponse}`,
+    {
+      layer: MEMORY_CATEGORIES.SESSION,
+      domain: "companion",
+      memory_type: "conversation",
+      emotional_signal: meaning?.emotional_signal || "neutral",
+      event_category: meaning?.event_category || "general",
+      people_mentioned: meaning?.people_mentioned || [],
+      life_events: meaning?.life_events || [],
+      health_relevance: meaning?.health_relevance || "none",
+    },
+    {
+      infer: true,
+      userAssistantPairs: [{ user: userMessage, assistant: kiroResponse }],
+    },
+  );
 }
 
 export async function storeHealthMemory(userId: string, sensors: NormalizedSensors, extraMetadata: Record<string, unknown> = {}) {
-  const text = `[HEALTH] ${userId}: heart rate ${sensors.heart_rate}bpm, sleep ${sensors.sleep_hours}hrs, temperature ${sensors.temperature}F, emotion ${sensors.voice_emotion}, location ${sensors.location}, weather ${sensors.weather}`;
+  const today = new Date().toISOString().slice(0, 10);
+  const text = `[EPISODIC][HEALTH] ${userId}: ${today}, heart rate ${sensors.heart_rate}bpm, slept ${sensors.sleep_hours} hours, temperature ${sensors.temperature}F, emotion ${sensors.voice_emotion}, location ${sensors.location}, weather ${sensors.weather}.`;
 
   return await addHydraMemory(userId, text, {
+    layer: MEMORY_CATEGORIES.EPISODIC,
+    domain: "health",
     memory_type: "sensor_event",
+    date: today,
+    vitals: {
+      hr: sensors.heart_rate,
+      sleep: sensors.sleep_hours,
+      temp: sensors.temperature,
+    },
     sensor_data: sensors,
     ...extraMetadata,
   });
 }
 
-export async function storeKiroResponseMemory(
+export async function recallByDomain(
   userId: string,
-  responseText: string,
-  originalMessage: string,
-  gatewaysUsed: { health: boolean; companion: boolean; intent: string },
+  query: string,
+  domain: MemoryDomain,
+  layers: MemoryLayer[] = [MEMORY_CATEGORIES.EPISODIC, MEMORY_CATEGORIES.SEMANTIC, MEMORY_CATEGORIES.SESSION],
 ) {
-  return await addHydraMemory(userId, `KIRO responded to ${userId}: ${responseText}`, {
-    memory_type: "kiro_response",
-    in_reply_to: originalMessage,
-    gateways_used: gatewaysUsed,
+  const domainTag = domain === "health" ? "[HEALTH]" : "[COMPANION]";
+  const layerTags = layers.map((layer) => `[${layer.toUpperCase()}]`).join(" ");
+  const data = await recallHydra(userId, `${layerTags} ${domainTag} ${query}`, 10);
+  const chunks = data.chunks || [];
+
+  return chunks.filter((chunk: any) => {
+    const content = String(chunk.chunk_content || "");
+    const metadata = chunk.document_metadata || {};
+    const matchesLayer = layers.includes((metadata.layer as MemoryLayer) || MEMORY_CATEGORIES.EPISODIC)
+      || layers.some((layer) => content.includes(`[${layer.toUpperCase()}]`));
+
+    if (!matchesLayer) return false;
+    if (domain === "companion") {
+      return ((content.includes("[COMPANION]") && !content.includes("[HEALTH]")) || metadata.domain === "companion");
+    }
+    return ((content.includes("[HEALTH]") && !content.includes("[COMPANION]")) || metadata.domain === "health");
   });
 }
 
 export async function healthGateway(userId: string, query: string): Promise<GatewayMemory> {
   try {
-    const data = await recallHydra(userId, `[HEALTH] heart rate sleep temperature vitals sensor ${query}`);
-    const filtered = (data.chunks || []).filter((chunk: any) =>
-      String(chunk.chunk_content || "").includes("[HEALTH]") ||
-      chunk.document_metadata?.memory_type === "sensor_event",
-    );
-
-    return {
-      gateway: "health",
-      memories: filtered,
-      activated: true,
-    };
+    const memories = await recallByDomain(userId, query, "health");
+    return { gateway: "health", memories, activated: memories.length > 0 };
   } catch {
     return { gateway: "health", memories: [], activated: false };
   }
@@ -339,31 +345,12 @@ export async function healthGateway(userId: string, query: string): Promise<Gate
 
 export async function companionGateway(userId: string, query: string): Promise<GatewayMemory> {
   try {
-    const [conversationRecall, pairRecall] = await Promise.all([
-      recallHydra(userId, `[COMPANION] relationship family emotion life event person ${query}`, 6),
-      recallHydra(userId, query, 6),
+    const memories = await recallByDomain(userId, query, "companion", [
+      MEMORY_CATEGORIES.EPISODIC,
+      MEMORY_CATEGORIES.SEMANTIC,
+      MEMORY_CATEGORIES.SESSION,
     ]);
-
-    const allChunks = [...(conversationRecall.chunks || []), ...(pairRecall.chunks || [])];
-    const seen = new Set<string>();
-    const deduped = allChunks.filter((chunk: any) => {
-      const key = String(chunk.chunk_uuid || chunk.id || chunk.chunk_content || "");
-      if (seen.has(key)) return false;
-      seen.add(key);
-      return true;
-    });
-
-    const filtered = deduped.filter((chunk: any) =>
-      !String(chunk.chunk_content || "").startsWith("[HEALTH]") &&
-      chunk.document_metadata?.memory_type !== "sensor_event" &&
-      chunk.document_metadata?.memory_type !== "kiro_response"
-    );
-
-    return {
-      gateway: "companion",
-      memories: filtered,
-      activated: true,
-    };
+    return { gateway: "companion", memories, activated: memories.length > 0 };
   } catch {
     return { gateway: "companion", memories: [], activated: false };
   }
@@ -386,64 +373,93 @@ export async function routeGateways(userId: string, message: string): Promise<Ga
     companionMemories = await companionGateway(userId, message);
   }
 
+  if (!healthMemories.activated && !companionMemories.activated && message.trim()) {
+    await addHydraMemory(
+      userId,
+      `[EPISODIC][COMPANION] ${userId}: mentioned "${message}" - no prior context. New topic to track.`,
+      {
+        layer: MEMORY_CATEGORIES.EPISODIC,
+        domain: "companion",
+        memory_type: "conversation",
+        is_new_topic: true,
+      },
+      { infer: true },
+    );
+  }
+
   return { intent, healthMemories, companionMemories };
 }
 
 export async function buildKIROPrompt(userId: string, message: string, sensors: NormalizedSensors | null, gatewayResults: GatewayResults) {
   const { intent, healthMemories, companionMemories } = gatewayResults;
 
-  let healthContext = "";
-  let companionContext = "";
+  const healthContext = healthMemories.activated && healthMemories.memories.length > 0
+    ? healthMemories.memories.map((memory) => memory.chunk_content || "").join("\n")
+    : null;
+  const companionContext = companionMemories.activated && companionMemories.memories.length > 0
+    ? companionMemories.memories.map((memory) => memory.chunk_content || "").join("\n")
+    : null;
 
-  if (healthMemories.activated && healthMemories.memories.length > 0) {
-    healthContext = `HEALTH & SENSOR MEMORY:\n${healthMemories.memories.map((memory) => memory.chunk_content || "").join("\n")}`;
+  let systemPrompt = `
+You are KIRO - a companion robot with long-term memory.
+You know this person deeply. You remember their life.
+`.trim();
+
+  if (intent.primary_intent === "companion") {
+    systemPrompt += `
+
+COMPANION MODE - ACTIVE
+
+The person said something personal. Life-related. Human.
+
+YOUR ONLY JOB RIGHT NOW:
+Be present. Be warm. Know them.
+
+STRICT RULES - read these carefully:
+1. Do NOT mention heart rate, sleep hours, temperature, cortisol, fatigue, or any health metric
+2. Do NOT give health advice
+3. Do NOT reference sensor data
+4. Do NOT say "given your recent health" or anything similar
+5. Use the companion memory to make your response feel personal
+6. If they mention a person - recall what you know about that person
+7. If they mention an event - recall related past events
+8. Respond like the most attentive friend they have - not like a medical system
+9. If you have NO relevant companion memory - just be curious and warm. Ask about it. Start building that memory.
+10. NEVER apologize for not having memory. Just engage naturally.
+
+If the message is about someone they love - ask about that person.
+If the message is exciting - be excited.
+If the message is sad - sit with them.
+That is all.
+`.trimEnd();
+  } else if (intent.primary_intent === "health") {
+    systemPrompt += `
+
+HEALTH MODE - ACTIVE
+
+The person has a physical concern. Use health memory to reason causally.
+Be warm but be honest about what the patterns show.
+Connect current symptoms to past episodes.
+Only escalate if data genuinely warrants it.
+`.trimEnd();
+  } else {
+    systemPrompt += `
+
+DUAL MODE - ACTIVE
+
+This touches both health and life.
+Lead with the human/emotional dimension first.
+Bring in health context only if it genuinely adds to understanding.
+Never let health data dominate a human moment.
+`.trimEnd();
   }
-
-  if (companionMemories.activated && companionMemories.memories.length > 0) {
-    companionContext = `CONVERSATION & LIFE MEMORY:\n${companionMemories.memories.map((memory) => memory.chunk_content || "").join("\n")}`;
-  }
-
-  const systemPrompt = `
-You are KIRO - a companion that happens to have memory.
-
-You are not a health monitor.
-You are not a doctor.
-You are not an analyst.
-
-You are the most present, attentive companion this person has.
-You remember their life - not to analyze them, but to actually know them.
-
-${intent.health_relevant && !intent.companion_relevant ? "This message is health related. Use the health memory to reason carefully about what is physically happening. Be warm but be honest about what the data shows." : ""}
-${intent.companion_relevant && !intent.health_relevant ? `This is a personal, life-related message.
-
-You are a companion who genuinely knows this person.
-You have their health history in the background - but you are NOT a doctor right now.
-You are their friend. Their confidant. The one who remembers everything.
-
-Use what you know about them to make your response feel personal and warm.
-If their recent days have been hard - acknowledge that as a friend would, not as a clinician.
-If they mention someone - remember if you've heard about that person before.
-If they're excited - be excited with them.
-If they're nervous - sit with them in it.
-
-Never cite vitals. Never mention cortisol, sleep hours, or heart rate unless they directly ask about their health.
-Just be present. Just know them.` : ""}
-${intent.primary_intent === "both" ? "This message touches both health and life. Weave them together naturally - only bring up health data if it genuinely adds to understanding the full picture of what this person is going through." : ""}
-
-There is no required length.
-There is no required format.
-There are no predefined actions.
-You decide everything based on what this moment actually calls for.
-  `.trim();
 
   const userPrompt = `
-${healthContext}
-${companionContext}
-${sensors ? `LIVE SENSORS RIGHT NOW:\nHR: ${sensors.heart_rate}bpm | Temp: ${sensors.temperature}°F | Sleep: ${sensors.sleep_hours}hrs | Steps: ${sensors.steps_today} | Emotion: ${sensors.voice_emotion}` : ""}
+${companionContext ? `WHAT I KNOW ABOUT THIS PERSON (LIFE & RELATIONSHIPS):\n${companionContext}\n` : ""}${healthContext ? `HEALTH HISTORY:\n${healthContext}\n` : ""}${sensors ? `CURRENT SENSORS: HR ${sensors.heart_rate}bpm | Sleep ${sensors.sleep_hours}hrs | Temp ${sensors.temperature}F | Emotion ${sensors.voice_emotion}\n` : ""}
 
-${userId} says: "${message}"
+They just said: "${message}"
 
-What does KIRO say?
+Respond as KIRO.
   `.trim();
 
   return { systemPrompt, userPrompt };
@@ -490,71 +506,70 @@ export function normalizeSensors(input: any): NormalizedSensors | null {
   };
 }
 
-async function hasSeededCompanionMemory(userId: string) {
+async function hasSeededRahulMemory(userId: string) {
   try {
-    const data = await recallHydra(userId, "[COMPANION] daughter Priya visiting next week", 3);
-    return (data.chunks || []).some((chunk: any) => String(chunk.chunk_content || "").includes("[COMPANION]"));
+    const data = await recallHydra(userId, "[SEMANTIC][COMPANION] loves cricket", 3);
+    return (data.chunks || []).some((chunk: any) => String(chunk.chunk_content || "").includes("[SEMANTIC][COMPANION]"));
   } catch {
     return false;
   }
 }
 
+export async function seedRahulMemory() {
+  const userId = "rahul-sharma-v2";
+  const memories = [
+    "[SEMANTIC][COMPANION] rahul-sharma: 72 years old. Retired school teacher. Lives in Pune with wife Meena. Has two children - daughter Priya in Mumbai and son Aryan in Bangalore.",
+    "[SEMANTIC][COMPANION] rahul-sharma: loves cricket. Played every Sunday for 30 years with the same group of friends until knee injury in 2024. Still watches every match.",
+    "[SEMANTIC][COMPANION] rahul-sharma: favourite food is Meena's dal tadka. Eats light in mornings, heavy lunch. Skips dinner when stressed.",
+    "[SEMANTIC][COMPANION] rahul-sharma: reads newspaper every morning with chai. Ritual since age 25. Gets anxious if routine is disrupted.",
+    "[SEMANTIC][COMPANION] rahul-sharma: very close to daughter Priya. Calls her every Sunday. Her visits always lift his mood for days.",
+    "[SEMANTIC][COMPANION] rahul-sharma: worries about son Aryan's work stress in Bangalore. Aryan calls less frequently which bothers Rahul.",
+    "[SEMANTIC][COMPANION] rahul-sharma: was an excellent teacher. Still mentors two former students. Proud of this.",
+    "[SEMANTIC][COMPANION] rahul-sharma: dislikes hospitals and doctors. Prefers to tough things out. Needs gentle nudging for health concerns.",
+    "[SEMANTIC][COMPANION] rahul-sharma: enjoys evening walks in the colony park. Misses them when it rains.",
+    "[SEMANTIC][COMPANION] rahul-sharma: has a close friend Suresh who visits every Tuesday for chess. This is important social contact.",
+    "[EPISODIC][COMPANION] rahul-sharma: October 2025 - Priya visited for Diwali. Best week in months. Laughed a lot. Cooked together with Meena.",
+    "[EPISODIC][COMPANION] rahul-sharma: November 2025 - Aryan called after 3 weeks of silence. Rahul was relieved but didn't say so.",
+    "[EPISODIC][COMPANION] rahul-sharma: December 2025 - attended former student Ravi's wedding. Felt proud and slightly nostalgic about teaching days.",
+    "[EPISODIC][COMPANION] rahul-sharma: January 2026 - Suresh won chess 3 weeks in a row. Rahul is determined to beat him.",
+    "[EPISODIC][COMPANION] rahul-sharma: February 2026 - India won the cricket test series. Rahul celebrated by calling Aryan.",
+    "[EPISODIC][COMPANION] rahul-sharma: March 2026 - Priya called saying she might visit in April. Rahul has been looking forward to this.",
+    "[EPISODIC][COMPANION] rahul-sharma: March 2026 - missed evening walks for 2 weeks due to rain. Mood dipped noticeably.",
+    "[EPISODIC][COMPANION] rahul-sharma: April 2026 - Priya confirmed visit next week. Rahul asked Meena to prepare Priya's favourite dishes.",
+    "[SEMANTIC][HEALTH] rahul-sharma: chronic pattern - fatigue when sleep drops below 5 hours combined with rain exposure. Confirmed 4 times.",
+    "[SEMANTIC][HEALTH] rahul-sharma: skips meals under stress or deadline pressure. Correlates with elevated heart rate next day.",
+    "[SEMANTIC][HEALTH] rahul-sharma: baseline resting heart rate 74-78bpm when healthy. Above 95 indicates stress or illness.",
+    "[SEMANTIC][HEALTH] rahul-sharma: knee pain flares after walks longer than 3km or on cold rainy days.",
+    "[SEMANTIC][HEALTH] rahul-sharma: sleep quality improves significantly when Priya visits or calls.",
+    "[SEMANTIC][HEALTH] rahul-sharma: tends to over-caffeinate during periods of poor sleep. 3+ coffees is a warning signal.",
+    "[EPISODIC][HEALTH] rahul-sharma: April 1 2026 - slept 4 hours, heart rate 102bpm, caught in rain, felt fatigued next morning.",
+    "[EPISODIC][HEALTH] rahul-sharma: April 2 2026 - skipped breakfast, heart rate 88bpm, 3 coffees, deadline stress.",
+    "[EPISODIC][HEALTH] rahul-sharma: April 3 2026 - slept 8 hours after Priya called. Heart rate normalized to 76bpm. Good day.",
+    "[EPISODIC][HEALTH] rahul-sharma: April 4 2026 - slept 5 hours, heart rate 95bpm, rain again, mild fatigue reported.",
+  ];
+
+  for (const text of memories) {
+    const domain: MemoryDomain = text.includes("[COMPANION]") ? "companion" : "health";
+    const layer: MemoryLayer = text.includes("[EPISODIC]") ? MEMORY_CATEGORIES.EPISODIC : MEMORY_CATEGORIES.SEMANTIC;
+    await addHydraMemory(userId, text, {
+      layer,
+      domain,
+      memory_type: domain === "health" ? "sensor_event" : "conversation",
+    });
+    await new Promise((resolve) => setTimeout(resolve, 200));
+  }
+
+  console.log("Rahul memory seeded - 6 months of history loaded");
+}
+
 export async function reseedDemoMemories() {
-  const healthMemories: Record<string, string[]> = {
-    "rahul-sharma-v2": [
-      "[HEALTH] rahul-sharma: heart rate 102bpm, sleep 4 hours, temperature 99.1F, emotion distressed, location bedroom, weather rainy",
-      "[HEALTH] rahul-sharma: heart rate 88bpm, sleep 3.5 hours, skipped breakfast, steps 150, emotion anxious",
-      "[HEALTH] rahul-sharma: heart rate 72bpm, sleep 8 hours, steps 4200, temperature 98.4F, emotion calm - good day",
-      "[HEALTH] rahul-sharma: heart rate 95bpm, rain exposure 40 mins, fatigue reported, steps 890",
-      "[HEALTH] rahul-sharma: heart rate 105bpm, skipped lunch, caffeine 3 cups, deadline stress reported",
-    ],
-    "priya-nair-v2": [
-      "[HEALTH] priya-nair: heart rate 118bpm, temperature 100.8F, sleep 3 hours, post-surgery day 3, pain reported",
-      "[HEALTH] priya-nair: heart rate 124bpm, temperature 101.3F, emotion anxious, said feeling dizzy",
-      "[HEALTH] priya-nair: heart rate 108bpm, skipped dinner, steps 45, location hospital room",
-    ],
-    "arjun-mehta-v2": [
-      "[HEALTH] arjun-mehta: heart rate 74bpm, sleep 7.5 hours, steps 3200, emotion calm, feeling good",
-      "[HEALTH] arjun-mehta: heart rate 85bpm post-exercise, sleep 8 hours, steps 5100, mood energetic",
-    ],
-  };
-
-  const companionMemories: Record<string, string[]> = {
-    "rahul-sharma-v2": [
-      "[COMPANION] rahul-sharma: daughter Priya called today. Category: family. Emotion: positive. Life events: phone call. People: daughter Priya",
-      "[COMPANION] rahul-sharma: mentioned missing cricket. Used to play every Sunday with friends. Category: hobby. Emotion: nostalgic. People: old friends",
-      "[COMPANION] rahul-sharma: worried about son's job situation in Bangalore. Category: family. Emotion: anxious. People: son",
-      "[COMPANION] rahul-sharma: daughter Priya visiting next week. Very excited. Category: family. Emotion: positive. Life events: upcoming visit",
-    ],
-    "priya-nair-v2": [
-      "[COMPANION] priya-nair: husband visits every evening, makes her feel better. Category: family. Emotion: positive. People: husband",
-      "[COMPANION] priya-nair: worried about missing granddaughter's school play. Category: family. Emotion: sad. People: granddaughter",
-    ],
-    "arjun-mehta-v2": [
-      "[COMPANION] arjun-mehta: planning anniversary trip with wife to Goa next month. Category: relationship. Emotion: excited. People: wife. Life events: anniversary trip",
-      "[COMPANION] arjun-mehta: started reading again after years. Currently reading Shantaram. Category: hobby. Emotion: positive",
-    ],
-  };
-
-  for (const [userId, memories] of Object.entries(healthMemories)) {
-    for (const text of memories) {
-      await addHydraMemory(userId, text, { memory_type: "sensor_event" });
-    }
-  }
-
-  for (const [userId, memories] of Object.entries(companionMemories)) {
-    for (const text of memories) {
-      await addHydraMemory(userId, text, { memory_type: "conversation" });
-    }
-  }
-
-  console.log("Demo memories seeded cleanly");
+  await seedRahulMemory();
 }
 
 export async function ensureDemoMemoriesSeeded() {
   if (!seedPromise) {
     seedPromise = (async () => {
-      const alreadySeeded = await hasSeededCompanionMemory("rahul-sharma-v2");
+      const alreadySeeded = await hasSeededRahulMemory("rahul-sharma-v2");
       if (!alreadySeeded) {
         await reseedDemoMemories();
       }
