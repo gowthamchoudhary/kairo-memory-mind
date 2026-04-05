@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { KeyboardEvent, useEffect, useState } from "react";
 import { Link, useLocation, useNavigate } from "react-router-dom";
 import {
   BarChart3,
@@ -40,6 +40,29 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
   const location = useLocation();
   const navigate = useNavigate();
   const [quickActionsOpen, setQuickActionsOpen] = useState(false);
+  const [searchText, setSearchText] = useState("");
+
+  useEffect(() => {
+    const params = new URLSearchParams(location.search);
+    setSearchText(location.pathname.startsWith("/robots") ? params.get("q") || "" : "");
+  }, [location.pathname, location.search]);
+
+  const submitRobotSearch = () => {
+    const params = new URLSearchParams();
+    if (searchText.trim()) {
+      params.set("q", searchText.trim());
+    }
+    navigate({
+      pathname: "/robots",
+      search: params.toString() ? `?${params.toString()}` : "",
+    });
+  };
+
+  const handleSearchKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
+    if (event.key === "Enter") {
+      submitRobotSearch();
+    }
+  };
 
   return (
     <>
@@ -106,9 +129,17 @@ export default function AppLayout({ children }: { children: React.ReactNode }) {
             <div className="ml-auto flex items-center gap-3">
               <div className="hidden items-center gap-3 rounded-full bg-[#F1F3F5] px-4 py-2.5 md:flex md:w-[280px]">
                 <Search className="h-4 w-4 text-slate-400" strokeWidth={1.9} />
-                <span className="flex-1 text-sm text-slate-400">Search dashboards</span>
+                <input
+                  type="text"
+                  value={searchText}
+                  onChange={(event) => setSearchText(event.target.value)}
+                  onKeyDown={handleSearchKeyDown}
+                  placeholder="Search robots"
+                  className="flex-1 bg-transparent text-sm text-slate-600 outline-none placeholder:text-slate-400"
+                  aria-label="Search robots"
+                />
                 <span className="rounded-full border border-white/70 bg-white px-2 py-0.5 text-[11px] font-medium text-slate-500 shadow-sm">
-                  Ctrl+K
+                  Enter
                 </span>
               </div>
 

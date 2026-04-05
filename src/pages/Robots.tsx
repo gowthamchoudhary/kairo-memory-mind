@@ -108,14 +108,33 @@ export default function Robots() {
       setImportModalOpen(true);
     }
 
-    setSearchParams({}, { replace: true });
+    const nextParams = new URLSearchParams(searchParams);
+    nextParams.delete("action");
+    setSearchParams(nextParams, { replace: true });
   }, [robots, searchParams, setSearchParams]);
 
   const alertRobot = robots.find((robot) => robot.status === "alert");
+  const searchQuery = (searchParams.get("q") || "").trim().toLowerCase();
   const importRobot = useMemo(
     () => robots.find((robot) => robot.id === importRobotId && robot.status !== "offline") ?? null,
     [importRobotId, robots],
   );
+  const filteredRobots = useMemo(() => {
+    if (!searchQuery) return robots;
+    return robots.filter((robot) =>
+      [
+        robot.id,
+        robot.name,
+        robot.type,
+        robot.userId,
+        robot.userName,
+        robot.status,
+      ]
+        .join(" ")
+        .toLowerCase()
+        .includes(searchQuery),
+    );
+  }, [robots, searchQuery]);
 
   const handleSendQuery = useCallback(async () => {
     if (!queryText.trim() || !queryModal) return;
@@ -295,7 +314,7 @@ export default function Robots() {
       </section>
 
       <section className="grid gap-6 xl:grid-cols-2">
-        {robots.map((robot) => {
+        {filteredRobots.map((robot) => {
           const styles = statusStyles(robot.status);
 
           return (
@@ -494,6 +513,15 @@ export default function Robots() {
           );
         })}
       </section>
+
+      {filteredRobots.length === 0 && (
+        <section className="dashboard-card px-6 py-12 text-center">
+          <p className="text-base font-semibold text-slate-900">No robots matched your search</p>
+          <p className="mt-2 text-sm text-slate-500">
+            Try searching by robot ID, user name, unit type, or status.
+          </p>
+        </section>
+      )}
 
       <Dialog open={!!queryModal} onOpenChange={() => setQueryModal(null)}>
         <DialogContent className="max-w-xl rounded-[24px] border border-[#EEF2F7] bg-white p-0 shadow-[0_24px_60px_rgba(15,23,42,0.14)]">

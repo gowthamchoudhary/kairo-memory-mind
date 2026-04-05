@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useSearchParams } from "react-router-dom";
 import { Filter, Maximize2, Send, ZoomIn } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -13,7 +13,7 @@ const users = [
   { id: "arjun", backendId: "arjun-mehta-v2", name: "Arjun Mehta" },
 ];
 
-type NodeType = "health_report" | "pattern" | "critical_alert";
+type NodeType = "health_report" | "pattern" | "critical_alert" | "companion_event";
 
 interface GraphNode {
   id: string;
@@ -36,21 +36,43 @@ type GraphFilter = "all" | "health" | "patterns";
 const graphDataByUser: Record<string, { nodes: GraphNode[]; links: GraphLink[] }> = {
   rahul: {
     nodes: [
-      { id: "EVT_rahul_001", label: "HR 102", episode: "EP_rahul_001", episodeTitle: "Tuesday Fatigue Spiral", type: "health_report", state: "deteriorating", confidence: 0.95 },
-      { id: "EVT_rahul_002", label: "Skipped breakfast", episode: "EP_rahul_001", episodeTitle: "Tuesday Fatigue Spiral", type: "health_report", state: "deteriorating", confidence: 0.92 },
-      { id: "EVT_rahul_003", label: "Sleep 3.5h", episode: "EP_rahul_002", episodeTitle: "Sleep Deficit Pattern", type: "health_report", state: "deteriorating", confidence: 0.99 },
-      { id: "EVT_rahul_004", label: "Rain 40min", episode: "EP_rahul_001", episodeTitle: "Tuesday Fatigue Spiral", type: "health_report", state: "deteriorating", confidence: 0.88 },
-      { id: "EVT_rahul_005", label: "Sleep 8h", episode: "EP_rahul_003", episodeTitle: "Recovery Day", type: "health_report", state: "improving", confidence: 0.94 },
-      { id: "EVT_rahul_P1", label: "Pattern", episode: "EP_rahul_001", episodeTitle: "Tuesday Fatigue Spiral", type: "pattern", state: "stable", confidence: 0.89 },
-      { id: "EVT_rahul_P2", label: "Meals + HR", episode: "EP_rahul_001", episodeTitle: "Tuesday Fatigue Spiral", type: "pattern", state: "stable", confidence: 0.74 },
+      { id: "SEM_rahul_001", label: "Teacher", episode: "SEM_rahul_identity", episodeTitle: "Who Rahul Is", type: "companion_event", state: "stable", confidence: 0.96 },
+      { id: "SEM_rahul_002", label: "Cricket", episode: "SEM_rahul_identity", episodeTitle: "Who Rahul Is", type: "companion_event", state: "stable", confidence: 0.94 },
+      { id: "SEM_rahul_003", label: "Priya bond", episode: "SEM_rahul_family", episodeTitle: "Family Connections", type: "companion_event", state: "improving", confidence: 0.97 },
+      { id: "SEM_rahul_004", label: "Aryan worry", episode: "SEM_rahul_family", episodeTitle: "Family Connections", type: "companion_event", state: "deteriorating", confidence: 0.88 },
+      { id: "SEM_rahul_005", label: "Suresh chess", episode: "SEM_rahul_social", episodeTitle: "Weekly Social Rituals", type: "companion_event", state: "stable", confidence: 0.9 },
+      { id: "EVT_rahul_010", label: "Diwali visit", episode: "EP_rahul_010", episodeTitle: "Priya's Diwali Visit", type: "companion_event", state: "improving", confidence: 0.93 },
+      { id: "EVT_rahul_011", label: "Aryan called", episode: "EP_rahul_011", episodeTitle: "Family Relief Call", type: "companion_event", state: "stable", confidence: 0.87 },
+      { id: "EVT_rahul_012", label: "Wedding", episode: "EP_rahul_012", episodeTitle: "Former Student Wedding", type: "companion_event", state: "stable", confidence: 0.85 },
+      { id: "EVT_rahul_013", label: "Suresh won", episode: "EP_rahul_013", episodeTitle: "Chess Rivalry", type: "companion_event", state: "stable", confidence: 0.82 },
+      { id: "EVT_rahul_014", label: "India won", episode: "EP_rahul_014", episodeTitle: "Cricket Celebration", type: "companion_event", state: "improving", confidence: 0.89 },
+      { id: "EVT_rahul_015", label: "Priya maybe April", episode: "EP_rahul_015", episodeTitle: "Upcoming Priya Visit", type: "companion_event", state: "improving", confidence: 0.9 },
+      { id: "EVT_rahul_016", label: "Rainy no walks", episode: "EP_rahul_016", episodeTitle: "Missed Evening Walks", type: "companion_event", state: "deteriorating", confidence: 0.86 },
+      { id: "EVT_rahul_017", label: "Visit confirmed", episode: "EP_rahul_017", episodeTitle: "Priya Visit Confirmed", type: "companion_event", state: "improving", confidence: 0.95 },
+      { id: "HEA_rahul_001", label: "HR 102", episode: "EP_rahul_health_01", episodeTitle: "Rain + Low Sleep Episode", type: "health_report", state: "deteriorating", confidence: 0.95 },
+      { id: "HEA_rahul_002", label: "3 coffees", episode: "EP_rahul_health_02", episodeTitle: "Stress Intake Pattern", type: "health_report", state: "deteriorating", confidence: 0.84 },
+      { id: "HEA_rahul_003", label: "HR 76", episode: "EP_rahul_health_03", episodeTitle: "Recovery After Priya Call", type: "health_report", state: "improving", confidence: 0.92 },
+      { id: "HEA_rahul_004", label: "Rain fatigue", episode: "EP_rahul_health_04", episodeTitle: "Rain Exposure Repeat", type: "health_report", state: "deteriorating", confidence: 0.88 },
+      { id: "PAT_rahul_001", label: "Rain + sleep", episode: "PAT_rahul_001", episodeTitle: "Fatigue Pattern", type: "pattern", state: "stable", confidence: 0.89 },
+      { id: "PAT_rahul_002", label: "Meals + stress", episode: "PAT_rahul_002", episodeTitle: "Stress Pattern", type: "pattern", state: "stable", confidence: 0.84 },
+      { id: "PAT_rahul_003", label: "Priya lifts mood", episode: "PAT_rahul_003", episodeTitle: "Priya Recovery Pattern", type: "pattern", state: "improving", confidence: 0.91 },
     ],
     links: [
-      { source: "EVT_rahul_001", target: "EVT_rahul_002", relation: "follows" },
-      { source: "EVT_rahul_001", target: "EVT_rahul_003", relation: "recurring" },
-      { source: "EVT_rahul_001", target: "EVT_rahul_P1", relation: "caused_by" },
-      { source: "EVT_rahul_004", target: "EVT_rahul_P1", relation: "caused_by" },
-      { source: "EVT_rahul_002", target: "EVT_rahul_P2", relation: "caused_by" },
-      { source: "EVT_rahul_005", target: "EVT_rahul_001", relation: "contradicts" },
+      { source: "SEM_rahul_003", target: "EVT_rahul_010", relation: "grounded_in" },
+      { source: "SEM_rahul_003", target: "EVT_rahul_015", relation: "anticipates" },
+      { source: "EVT_rahul_015", target: "EVT_rahul_017", relation: "confirmed_as" },
+      { source: "EVT_rahul_017", target: "PAT_rahul_003", relation: "supports" },
+      { source: "HEA_rahul_003", target: "PAT_rahul_003", relation: "caused_by" },
+      { source: "SEM_rahul_002", target: "EVT_rahul_014", relation: "inspires" },
+      { source: "SEM_rahul_005", target: "EVT_rahul_013", relation: "linked_to" },
+      { source: "EVT_rahul_016", target: "PAT_rahul_001", relation: "supports" },
+      { source: "HEA_rahul_001", target: "PAT_rahul_001", relation: "supports" },
+      { source: "HEA_rahul_004", target: "PAT_rahul_001", relation: "recurs_as" },
+      { source: "HEA_rahul_002", target: "PAT_rahul_002", relation: "supports" },
+      { source: "SEM_rahul_004", target: "HEA_rahul_002", relation: "contributes_to" },
+      { source: "SEM_rahul_003", target: "HEA_rahul_003", relation: "improves" },
+      { source: "EVT_rahul_011", target: "SEM_rahul_004", relation: "relates_to" },
+      { source: "EVT_rahul_012", target: "SEM_rahul_001", relation: "reinforces" },
     ],
   },
   priya: {
@@ -86,9 +108,9 @@ const graphDataByUser: Record<string, { nodes: GraphNode[]; links: GraphLink[] }
 
 const memoryFeed: Record<string, Array<{ label: string; time: string; text: string; confidence: number; eventId: string }>> = {
   rahul: [
-    { label: "Heart rate", time: "2 hours ago", text: "98 bpm — distressed emotion detected", confidence: 0.95, eventId: "EVT_rahul_001" },
-    { label: "Sleep pattern", time: "Yesterday", text: "4.2 hours — below healthy threshold", confidence: 0.99, eventId: "EVT_rahul_003" },
-    { label: "Weather exposure", time: "2 days ago", text: "Caught in rain, walked 40 mins", confidence: 0.88, eventId: "EVT_rahul_004" },
+    { label: "Priya visit", time: "This week", text: "Priya confirmed her visit next week. Rahul asked Meena to cook her favorite dishes.", confidence: 0.95, eventId: "EVT_rahul_017" },
+    { label: "Heart rate", time: "4 days ago", text: "102 bpm after 4 hours of sleep and rain exposure.", confidence: 0.95, eventId: "HEA_rahul_001" },
+    { label: "Recovery day", time: "3 days ago", text: "After Priya called, Rahul slept 8 hours and heart rate normalized to 76 bpm.", confidence: 0.92, eventId: "HEA_rahul_003" },
   ],
   priya: [
     { label: "Heart rate", time: "1 hour ago", text: "124 bpm — critical, nurse notified", confidence: 0.96, eventId: "EVT_priya_001" },
@@ -104,8 +126,9 @@ const memoryFeed: Record<string, Array<{ label: string; time: string; text: stri
 
 const patterns: Record<string, Array<{ label: string; desc: string; count: number; confidence: number }>> = {
   rahul: [
-    { label: "HIGH CONFIDENCE", desc: "Low sleep + rain exposure -> fatigue next morning", count: 4, confidence: 0.89 },
-    { label: "MEDIUM CONFIDENCE", desc: "Skipped meals + stress -> elevated heart rate", count: 2, confidence: 0.74 },
+    { label: "HIGH CONFIDENCE", desc: "Fatigue appears when sleep drops below 5 hours and rain exposure happens the same day.", count: 4, confidence: 0.89 },
+    { label: "HIGH CONFIDENCE", desc: "Priya calling or visiting measurably improves Rahul's mood and next-day recovery.", count: 3, confidence: 0.91 },
+    { label: "MEDIUM CONFIDENCE", desc: "Stress and skipped meals tend to push heart rate above Rahul's normal baseline.", count: 2, confidence: 0.84 },
   ],
   priya: [
     { label: "HIGH CONFIDENCE", desc: "Heart rate above 115 bpm -> pain escalation", count: 3, confidence: 0.92 },
@@ -120,6 +143,7 @@ const patterns: Record<string, Array<{ label: string; desc: string; count: numbe
 function getNodeColor(node: GraphNode): string {
   if (node.type === "critical_alert") return "#DC2626";
   if (node.type === "pattern") return "#8B5CF6";
+  if (node.type === "companion_event") return "#2563EB";
   if (node.state === "deteriorating") return "#F59E0B";
   if (node.state === "improving") return "#16A34A";
   return "#2563EB";
@@ -128,12 +152,13 @@ function getNodeColor(node: GraphNode): string {
 function getNodeSize(node: GraphNode): number {
   if (node.type === "critical_alert") return 9;
   if (node.type === "pattern") return 8;
+  if (node.type === "companion_event") return 7.5;
   return 7;
 }
 
 function shouldShowNode(node: GraphNode, filter: GraphFilter): boolean {
   if (filter === "all") return true;
-  if (filter === "health") return node.type !== "pattern";
+  if (filter === "health") return node.type === "health_report" || node.type === "critical_alert";
   return node.type === "pattern";
 }
 
@@ -150,6 +175,7 @@ export default function Memory() {
   const containerRef = useRef<HTMLDivElement>(null);
   const queryInputRef = useRef<HTMLInputElement>(null);
   const [dimensions, setDimensions] = useState({ width: 900, height: 420 });
+  const [graphVersion, setGraphVersion] = useState(0);
 
   useEffect(() => {
     const updateDimensions = () => {
@@ -190,10 +216,21 @@ export default function Memory() {
   const graphData = graphDataByUser[selectedUser] || { nodes: [], links: [] };
   const feed = memoryFeed[selectedUser] || [];
   const pats = patterns[selectedUser] || [];
-  const filteredNodes = graphData.nodes.filter((node) => shouldShowNode(node, graphFilter));
+  const filteredNodes = useMemo(
+    () => graphData.nodes.filter((node) => shouldShowNode(node, graphFilter)),
+    [graphData.nodes, graphFilter],
+  );
   const filteredNodeIds = new Set(filteredNodes.map((node) => node.id));
-  const filteredLinks = graphData.links.filter((link) => filteredNodeIds.has(link.source) && filteredNodeIds.has(link.target));
-  const episodes = [...new Set(graphData.nodes.map((node) => node.episodeTitle))];
+  const filteredLinks = useMemo(
+    () => graphData.links.filter((link) => filteredNodeIds.has(String(link.source)) && filteredNodeIds.has(String(link.target))),
+    [graphData.links, filteredNodeIds],
+  );
+  const episodes = [...new Set(filteredNodes.map((node) => node.episodeTitle))];
+
+  useEffect(() => {
+    setGraphVersion((value) => value + 1);
+    setHoveredNode(null);
+  }, [selectedUser, graphFilter]);
 
   const nodeCanvasObject = useCallback((node: any, ctx: CanvasRenderingContext2D, globalScale: number) => {
     const graphNode = node as GraphNode & { x: number; y: number };
@@ -235,7 +272,6 @@ export default function Memory() {
             onClick={() => {
               setSelectedUser(user.id);
               setKiroResponse("");
-              setHoveredNode(null);
             }}
             className={`rounded-xl px-4 py-2.5 text-sm font-medium transition-all ${
               selectedUser === user.id
@@ -253,12 +289,12 @@ export default function Memory() {
           <div>
             <h2 className="text-lg font-semibold text-slate-900">Episodic Memory Graph</h2>
             <p className="mt-1 text-sm text-slate-500">
-              {graphData.nodes.length} events across {episodes.length} episodes • Drag to explore
+              {filteredNodes.length} visible memories across {episodes.length} clusters • Layout locks after loading
             </p>
           </div>
 
           <div className="flex items-center gap-2">
-            <button type="button" className="dashboard-secondary-button px-3" onClick={() => graphRef.current?.zoomToFit(300)}>
+            <button type="button" className="dashboard-secondary-button px-3" onClick={() => graphRef.current?.zoomToFit(300, 48)}>
               <ZoomIn className="h-4 w-4" strokeWidth={1.9} />
             </button>
             <button type="button" className="dashboard-secondary-button px-3" onClick={() => setGraphExpanded(!graphExpanded)}>
@@ -288,11 +324,13 @@ export default function Memory() {
 
         <div ref={containerRef} className="relative bg-[#FBFCFE]" style={{ height: graphExpanded ? 520 : 420 }}>
           <ForceGraph2D
+            key={graphVersion}
             ref={graphRef}
             backgroundColor="#FBFCFE"
-            cooldownTicks={80}
-            d3AlphaDecay={0.04}
-            d3VelocityDecay={0.28}
+            cooldownTicks={120}
+            d3AlphaDecay={0.08}
+            d3VelocityDecay={0.45}
+            enableNodeDrag={false}
             graphData={{ nodes: filteredNodes, links: filteredLinks }}
             height={dimensions.height}
             linkColor={() => "#CBD5E1"}
@@ -307,12 +345,16 @@ export default function Memory() {
               ctx.fillStyle = color;
               ctx.fill();
             }}
+            onEngineStop={() => {
+              graphRef.current?.zoomToFit?.(400, 48);
+              graphRef.current?.pauseAnimation?.();
+            }}
             onNodeHover={(node: any) => setHoveredNode(node as GraphNode | null)}
             width={dimensions.width}
           />
 
           {hoveredNode && (
-            <div className="absolute right-4 top-4 max-w-[240px] rounded-[20px] border border-[#E5E7EB] bg-white p-4 shadow-[0_18px_40px_rgba(15,23,42,0.12)]">
+            <div className="absolute right-4 top-4 max-w-[260px] rounded-[20px] border border-[#E5E7EB] bg-white p-4 shadow-[0_18px_40px_rgba(15,23,42,0.12)]">
               <p className="text-sm font-semibold text-slate-900">{hoveredNode.label}</p>
               <p className="mt-1 text-sm text-slate-500">{hoveredNode.episodeTitle}</p>
               <div className="mt-3 flex items-center gap-2 text-xs text-slate-500">
@@ -323,7 +365,7 @@ export default function Memory() {
           )}
 
           <div className="absolute bottom-4 left-4 flex flex-wrap gap-3 rounded-full bg-white/90 px-4 py-2 text-xs text-slate-500 shadow-sm backdrop-blur">
-            <span className="flex items-center gap-2"><span className="h-2.5 w-2.5 rounded-full bg-[#2563EB]" /> Stable</span>
+            <span className="flex items-center gap-2"><span className="h-2.5 w-2.5 rounded-full bg-[#2563EB]" /> Companion</span>
             <span className="flex items-center gap-2"><span className="h-2.5 w-2.5 rounded-full bg-[#F59E0B]" /> Deteriorating</span>
             <span className="flex items-center gap-2"><span className="h-2.5 w-2.5 rounded-full bg-[#16A34A]" /> Improving</span>
             <span className="flex items-center gap-2"><span className="h-2.5 w-2.5 rounded-full bg-[#8B5CF6]" /> Pattern</span>
@@ -336,7 +378,7 @@ export default function Memory() {
         <section className="dashboard-card p-6">
           <div className="mb-5">
             <h2 className="text-lg font-semibold text-slate-900">Raw Memory Feed</h2>
-            <p className="mt-1 text-sm text-slate-500">Event-level records captured from KIRO monitoring</p>
+            <p className="mt-1 text-sm text-slate-500">Recent high-signal memories driving the active graph</p>
           </div>
 
           <div className="space-y-3">
@@ -359,7 +401,7 @@ export default function Memory() {
         <section className="dashboard-card p-6">
           <div className="mb-5">
             <h2 className="text-lg font-semibold text-slate-900">Patterns Detected</h2>
-            <p className="mt-1 text-sm text-slate-500">High-signal inferences surfaced by the memory engine</p>
+            <p className="mt-1 text-sm text-slate-500">Long-range observations surfaced from Rahul's six-month memory lane</p>
           </div>
 
           <div className="space-y-4">
